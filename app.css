@@ -27,6 +27,15 @@ html,body{
 
 [hidden]{display:none !important;}
 
+button{-webkit-appearance:none;appearance:none;cursor:pointer;}
+.icon{
+  display:block;flex:none;width:22px;height:22px;overflow:visible;
+  fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;
+}
+.icon-btn,.swap-btn,.key-btn,.close{
+  padding:0;display:inline-flex;align-items:center;justify-content:center;
+}
+
 body{display:flex;flex-direction:column;}
 
 #app{
@@ -118,7 +127,7 @@ body{display:flex;flex-direction:column;}
 .ghost-slot{display:block;}
 
 .talk-btn{
-  height:60px;border-radius:999px;border:none;font:inherit;font-size:18px;font-weight:600;
+  height:60px;min-width:0;padding:0 12px;border-radius:999px;border:none;font:inherit;font-size:18px;font-weight:600;
   display:flex;align-items:center;justify-content:center;gap:10px;
   background:var(--accent);color:#04121a;
   box-shadow:0 10px 30px rgba(55,230,255,.22);
@@ -126,7 +135,16 @@ body{display:flex;flex-direction:column;}
   position:relative;
 }
 .talk-btn:active{transform:scale(.98);}
-.talk-btn .ico{font-size:20px;line-height:1;}
+.talk-btn .lbl{line-height:1;}
+.talk-btn .stop-icon{display:none;}
+.talk-btn.listening .mic-icon{display:none;}
+.talk-btn.listening .stop-icon{display:block;}
+.talk-btn:disabled{opacity:.72;cursor:wait;}
+.speech-hint{
+  margin:0;text-align:center;font-size:12px;line-height:1.45;
+  min-height:18px;color:var(--muted);
+}
+.close .icon{width:18px;height:18px;}
 .talk-btn.listening{
   background:#ff5d5d;color:#fff;box-shadow:0 10px 30px rgba(255,93,93,.3);
 }
@@ -237,7 +255,8 @@ textarea{resize:none;line-height:1.5;user-select:text;-webkit-user-select:text;}
   .topbar{justify-content:flex-end;padding:calc(4px + var(--safe-t)) calc(10px + var(--safe-r)) 0 calc(10px + var(--safe-l));}
   .stage{padding:0 34px;}
   .trans{font-size:calc(var(--trans-size) * .95);}
-  .controls{flex-direction:row;align-items:center;gap:14px;padding:4px calc(12px + var(--safe-r)) calc(8px + var(--safe-b)) calc(12px + var(--safe-l));}
+  .controls{flex-direction:row;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:4px calc(12px + var(--safe-r)) calc(8px + var(--safe-b)) calc(12px + var(--safe-l));}
+  .speech-hint{flex-basis:100%;}
   .dirbar{flex:1;}
   .microw{grid-template-columns:44px 150px;gap:10px;}
   .ghost-slot{display:none;}

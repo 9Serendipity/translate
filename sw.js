@@ -1,11 +1,11 @@
 /* 同源静态资源：先走网络，失败再退缓存。
    （翻译接口是跨域的，一律不拦。） */
-const CACHE = 'livesubs-v4';
+const CACHE = 'livesubs-v5';
 const ASSETS = [
   './',
   './index.html',
-  './app.css',
-  './app.js',
+  './app.css?v=5',
+  './app.js?v=5',
   './manifest.webmanifest',
   './icons/icon-180.png',
   './icons/icon-192.png',
@@ -19,7 +19,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('livesubs-') && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });

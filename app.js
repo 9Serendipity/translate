@@ -88,6 +88,7 @@
     el.dstName.textContent = dstLang().native;
     el.trans.dir = dstLang().rtl ? 'rtl' : 'ltr';
     if (el.trans.classList.contains('placeholder')) el.trans.textContent = placeholderText();
+    if (!state.listening && !state.stopping) setSpeechHint();
     fitAll();
   }
 
@@ -301,22 +302,31 @@
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const state = {
     listening: false,
+    stopping: false,
     rec: null,
     buffer: '',
+    interim: '',
+    prefix: '',
+    started: false,
+    sessionHadText: false,
+    emptyEnds: 0,
     lastVoice: 0,
     token: 0,
     wakeLock: null,
     restartTimer: 0,
     idleTimer: 0,
+    stopTimer: 0,
   };
 
-  const IDLE_STOP_MS = 20000;
+  const IDLE_STOP_MS = 30000;
 
   async function keepAwake() {
     try {
       if ('wakeLock' in navigator) {
-        state.wakeLock = await navigator.wakeLock.request('screen');
-        state.wakeLock.addEventListener('release', () => { state.wakeLock = null; });
+        const lock = await navigator.wakeLock.request('screen');
+        if (!state.listening) { await lock.release(); return; }
+        state.wakeLock = lock;
+        lock.addEventListener('release', () => { if (state.wakeLock === lock) state.wakeLock = null; });
       }
     } catch { /* 不支持就算了 */ }
   }
@@ -327,9 +337,18 @@
 
   function uiListening(on) {
     el.talk.classList.toggle('listening', on);
+    el.talk.setAttribute('aria-pressed', String(on));
+    el.talk.disabled = false;
     $('.lbl', el.talk).textContent = on ? '停止' : '说话';
-    if (on) setStatus('正在听…', true);
-    else setStatus('待机', false);
+    if (!on) setStatus('待机', false);
+  }
+
+  function setSpeechHint(text = `麦克风收音 · 请说 ${srcLang().native}`) {
+    $('#speechHint').textContent = text;
+  }
+
+  function currentTranscript() {
+    return [state.buffer, state.interim].filter(Boolean).join(' ').trim();
   }
 
   let translateTimer = 0;
@@ -339,9 +358,9 @@
     const to = settings.dst;
 
     clearTimeout(translateTimer);
+    const token = ++state.token;
     translateTimer = setTimeout(async () => {
       if (!text.trim()) return;
-      const token = ++state.token;
       // 已经有译文就先压暗，等新的回来再换
       if (!el.trans.textContent.trim() || el.trans.classList.contains('placeholder')) {
         setTrans('…', { pending: true });
@@ -354,7 +373,7 @@
         if (token !== state.token) return; // 已经有更新的一句
         setTrans(out);
         const ms = Math.round(performance.now() - t0);
-        setStatus(`${engine === 'none' ? '同语' : '已译'} ${ms}ms`);
+        setStatus(`${engine === 'none' ? '同语' : '已译'} ${ms}ms`, state.listening);
         if (isFinal) {
           pushHistory(text, out, from, to);
           speak(out, to);
@@ -375,53 +394,86 @@
     rec.interimResults = true;
     rec.maxAlternatives = 1;
 
-    rec.onstart = () => setStatus('正在听…', true);
+    rec.onstart = () => {
+      if (state.rec !== rec || !state.listening) return;
+      if (!state.started) state.lastVoice = Date.now();
+      state.started = true;
+      setStatus(`正在听 ${srcLang().native}…`, true);
+      setSpeechHint(`请说 ${srcLang().native} · 把手机靠近说话人或外放音源`);
+    };
+    rec.onsoundstart = rec.onspeechstart = () => {
+      if (state.rec !== rec || !state.listening) return;
+      state.lastVoice = Date.now();
+      setStatus('收到声音，正在识别…', true);
+    };
 
     rec.onresult = (event) => {
+      if (state.rec !== rec) return;
       state.lastVoice = Date.now();
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const finals = [];
+      const interim = [];
+      // results 是本次识别的完整快照。重建文字，避免重复累加已确认结果。
+      for (let i = 0; i < event.results.length; i += 1) {
         const r = event.results[i];
-        const t = r[0]?.transcript || '';
-        if (r.isFinal) state.buffer = `${state.buffer} ${t}`.trim();
-        else interim += t;
+        const t = (r[0]?.transcript || '').trim();
+        if (r.isFinal) finals.push(t);
+        else interim.push(t);
       }
-      const live = `${state.buffer} ${interim}`.trim();
+      state.buffer = [state.prefix, ...finals].filter(Boolean).join(' ').trim();
+      state.interim = interim.filter(Boolean).join(' ').trim();
+      const live = currentTranscript();
       if (!live) return;
+      state.sessionHadText = state.sessionHadText || finals.some(Boolean) || interim.some(Boolean);
+      state.emptyEnds = 0;
       setOrig(live);
-      queueTranslate(live, interim === '');
+      if (!state.stopping) queueTranslate(live, !state.interim);
     };
 
     rec.onerror = (event) => {
+      if (state.rec !== rec) return;
       const code = event.error;
-      if (code === 'no-speech' || code === 'aborted') return;
-      if (code === 'not-allowed' || code === 'service-not-allowed') {
-        stopListening({ silent: true });
-        setStatus('麦克风被拒');
-        toast('麦克风被拒绝了。到「设置 → Safari → 麦克风」里允许，或确认页面是 HTTPS。', 5200);
+      if (code === 'aborted') return;
+      if (code === 'no-speech') {
+        setSpeechHint(`暂未识别到 ${srcLang().native} · 请靠近声源，确认左侧语言`);
         return;
       }
-      if (code === 'network') {
-        toast('语音识别需要联网，网络好像不通。', 4000);
-        return;
-      }
-      console.warn('[speech] error', code);
+      const errors = {
+        'not-allowed': ['需要麦克风权限', '请在 Safari 中允许本站使用麦克风和语音识别，再点一次说话。'],
+        'service-not-allowed': ['系统语音识别不可用', '请用 Safari 打开，并检查 Siri、听写和语音识别权限；也可用键盘听写。'],
+        'network': ['语音识别连接失败', '语音识别服务未连接成功，请换个网络或用键盘听写。'],
+        'audio-capture': ['没有可用的麦克风', '请检查麦克风权限及蓝牙耳机的输入，或用键盘听写。'],
+        'language-not-supported': ['暂不支持这个识别语言', '请更换左侧语言，或用键盘听写后翻译。'],
+      };
+      const [title, message] = errors[code] || ['语音识别中断', '请重新点说话，或点左下角用键盘听写。'];
+      failRecognition(title, message);
     };
 
     rec.onend = () => {
-      // iOS 每次停顿都会自己结束，只要还在听就重启
+      if (state.rec !== rec) return;
+      if (state.stopping) { finishListening(); return; }
       if (!state.listening) return;
+
+      // Safari 有时只给临时结果就结束。先保留文字，再开始下一段。
+      state.buffer = currentTranscript();
+      state.interim = '';
+      if (state.sessionHadText && state.buffer) queueTranslate(state.buffer, true);
+      state.emptyEnds = state.sessionHadText ? 0 : state.emptyEnds + 1;
+      if (state.emptyEnds >= 4) {
+        finishListening();
+        setSpeechHint('识别多次未返回文字 · 请靠近声源，或点左下角用键盘听写');
+        return;
+      }
       clearTimeout(state.restartTimer);
       state.restartTimer = setTimeout(() => {
-        if (!state.listening) return;
+        if (!state.listening || state.rec !== rec) return;
+        state.prefix = state.buffer;
+        state.sessionHadText = false;
         try {
           rec.start();
         } catch {
-          setTimeout(() => {
-            if (state.listening) { try { rec.start(); } catch { /* 放弃 */ } }
-          }, 500);
+          failRecognition('语音识别无法继续', '请重新点说话，或点左下角用键盘听写。');
         }
-      }, 220);
+      }, Math.min(350 + state.emptyEnds * 250, 1500));
     };
 
     return rec;
@@ -429,7 +481,8 @@
 
   function startListening() {
     if (!SR) {
-      toast('这个浏览器没有语音识别（需要 Safari 14.1+）。先用 ⌨️ 打字吧。', 4600);
+      setSpeechHint('请用 Safari 打开；也可点左下角用键盘听写');
+      toast('当前浏览器没有可用的语音识别。请用 Safari 打开，或用键盘听写。', 4600);
       return;
     }
     if (!window.isSecureContext) {
@@ -441,6 +494,11 @@
 
     state.listening = true;
     state.buffer = '';
+    state.interim = '';
+    state.prefix = '';
+    state.started = false;
+    state.sessionHadText = false;
+    state.emptyEnds = 0;
     state.lastVoice = Date.now();
     state.token += 1;
 
@@ -448,6 +506,8 @@
     if (el.trans.classList.contains('placeholder')) setTrans('…', { pending: true });
     else el.trans.classList.add('pending');
     uiListening(true);
+    setStatus('正在启动语音识别…', true);
+    setSpeechHint(`准备接收 ${srcLang().native} · 首次使用请允许麦克风和语音识别`);
     keepAwake();
 
     try {
@@ -455,9 +515,7 @@
       state.rec.start();
     } catch (err) {
       console.warn(err);
-      stopListening({ silent: true });
-      setStatus('麦克风没起来');
-      toast(`启动识别失败：${err?.message || err}。检查麦克风权限后重试，或先用 ⌨️ 打字。`, 5600);
+      failRecognition('语音识别未启动', '请检查 Safari 麦克风与语音识别权限，或点左下角用键盘听写。');
       return;
     }
 
@@ -466,36 +524,79 @@
       if (!state.listening) return;
       if (Date.now() - state.lastVoice > IDLE_STOP_MS) {
         stopListening();
-        toast('好一会儿没声音了，已自动停止。');
+        toast('30 秒未收到新的识别结果，已停止收音。');
       }
     }, 1000);
   }
 
   function stopListening({ silent = false } = {}) {
-    const wasListening = state.listening;
+    const wasListening = state.listening || state.stopping;
     state.listening = false;
     clearTimeout(state.restartTimer);
     clearInterval(state.idleTimer);
-    if (state.rec) {
-      try { state.rec.onend = null; state.rec.stop(); } catch { /* noop */ }
-      try { state.rec.abort?.(); } catch { /* noop */ }
-      state.rec = null;
+    clearTimeout(translateTimer);
+    state.token += 1;
+
+    if (silent) { finishListening({ discard: true, abort: true }); return; }
+    if (!wasListening || state.stopping) return;
+    if (!state.rec) { finishListening(); return; }
+
+    // stop 会尝试给出最后一句；立即 abort 会把这个结果丢掉。
+    state.stopping = true;
+    uiListening(false);
+    el.talk.disabled = true;
+    $('.lbl', el.talk).textContent = '收尾中';
+    setStatus('正在处理最后一句…');
+    state.stopTimer = setTimeout(() => finishListening({ abort: true }), 2500);
+    try { state.rec.stop(); } catch { finishListening({ abort: true }); }
+  }
+
+  function finishListening({ discard = false, abort = false } = {}) {
+    clearTimeout(state.stopTimer);
+    clearTimeout(state.restartTimer);
+    clearInterval(state.idleTimer);
+    const text = currentTranscript();
+    const rec = state.rec;
+    state.rec = null;
+    state.listening = false;
+    state.stopping = false;
+    if (rec) {
+      rec.onstart = rec.onresult = rec.onerror = rec.onend = null;
+      rec.onsoundstart = rec.onspeechstart = null;
+      if (abort) { try { rec.abort(); } catch { /* noop */ } }
     }
     uiListening(false);
     releaseAwake();
-
-    if (!silent && wasListening) {
-      const text = state.buffer.trim();
-      if (text) {
-        queueTranslate(text, true);
-        setOrig(text);
-      } else if (el.trans.classList.contains('pending')) {
-        setTrans('没听清，再说一次？', { placeholder: true });
-      }
+    if (discard) {
+      el.trans.classList.remove('pending');
+      return;
+    }
+    setSpeechHint();
+    if (text) {
+      state.buffer = text;
+      state.interim = '';
+      setOrig(text);
+      setStatus('正在翻译…');
+      queueTranslate(text, true);
+    } else {
+      setTrans('还没有收到语音', { placeholder: true });
+      setStatus('未收到识别文字');
+      setSpeechHint(`请确认说的是 ${srcLang().native}，并靠近声源；也可用键盘听写`);
     }
   }
 
+  function failRecognition(title, message) {
+    const text = currentTranscript();
+    stopListening({ silent: true });
+    if (text) { setOrig(text); queueTranslate(text, true); }
+    else setTrans(title, { placeholder: true });
+    setStatus(title);
+    setSpeechHint(message);
+    toast(message, 5200);
+  }
+
   function toggleTalk() {
+    if (state.stopping) return;
     if (state.listening) stopListening();
     else startListening();
   }
@@ -671,6 +772,8 @@
 
   /* ---------------- 打字输入 ---------------- */
   function openType() {
+    stopListening({ silent: true });
+    setSpeechHint();
     $('#typeInput').value = '';
     openSheet('typeSheet');
     setTimeout(() => $('#typeInput').focus(), 220);
@@ -679,6 +782,7 @@
   async function sendTyped() {
     const text = $('#typeInput').value.trim();
     if (!text) return;
+    stopListening({ silent: true });
     closeSheet('typeSheet');
     setOrig(text);
     setTrans('…', { pending: true });

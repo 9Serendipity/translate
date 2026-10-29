@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png" sizes="192x192">
-<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="app.css?v=5">
 </head>
 <body>
 
@@ -25,8 +25,8 @@
 <main id="app">
   <header class="topbar">
     <span class="brand">随身翻译</span>
-    <button class="icon-btn" id="openHistory" type="button" aria-label="对话记录">☰</button>
-    <button class="icon-btn" id="openSettings" type="button" aria-label="设置">⚙</button>
+    <button class="icon-btn" id="openHistory" type="button" aria-label="对话记录"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14"/></svg></button>
+    <button class="icon-btn" id="openSettings" type="button" aria-label="设置"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 3-.7 2.2-2 .9-2.1-.5-2.2 3.8L4 11v2l-1.5 1.6 2.2 3.8 2.1-.5 2 .9.7 2.2h5l.7-2.2 2-.9 2.1.5 2.2-3.8L20 13v-2l1.5-1.6-2.2-3.8-2.1.5-2-.9L14.5 3z"/><circle cx="12" cy="12" r="3"/></svg></button>
   </header>
 
   <section class="stage">
@@ -41,7 +41,7 @@
         <span class="lang-name" id="srcName">English</span>
         <span class="lang-tag">说</span>
       </button>
-      <button class="swap-btn" id="swap" type="button" aria-label="交换方向">⇄</button>
+      <button class="swap-btn" id="swap" type="button" aria-label="交换方向"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16m-4-4 4 4-4 4M20 16H4m4-4-4 4 4 4"/></svg></button>
       <button class="lang-btn" id="dstBtn" type="button">
         <span class="lang-name" id="dstName">简体中文</span>
         <span class="lang-tag">译成</span>
@@ -49,12 +49,14 @@
     </div>
 
     <div class="microw">
-      <button class="key-btn" id="openType" type="button" aria-label="打字输入">⌨️</button>
-      <button class="talk-btn" id="talk" type="button">
-        <span class="ico">🎙</span><span class="lbl">说话</span>
+      <button class="key-btn" id="openType" type="button" aria-label="打字输入"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="M7 9h.01M12 9h.01M17 9h.01M7 12h.01M12 12h.01M17 12h.01M8 15h8"/></svg></button>
+      <button class="talk-btn" id="talk" type="button" aria-pressed="false" aria-describedby="speechHint">
+        <svg class="icon mic-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg>
+        <svg class="icon stop-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/></svg><span class="lbl">说话</span>
       </button>
       <span class="ghost-slot" aria-hidden="true"></span>
     </div>
+    <p class="speech-hint" id="speechHint" role="status">麦克风收音 · 请说 English</p>
   </footer>
 </main>
 
@@ -63,7 +65,7 @@
 <!-- 设置 -->
 <div class="sheet" id="settingsSheet" hidden>
   <div class="sheet-card">
-    <header><h2>设置</h2><button class="close" data-close="settingsSheet" type="button">✕</button></header>
+    <header><h2>设置</h2><button class="close" data-close="settingsSheet" type="button" aria-label="关闭设置"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
     <div class="sheet-body">
       <label class="row">
         <span>字号</span>
@@ -120,7 +122,7 @@
 <!-- 语言选择 -->
 <div class="sheet" id="langSheet" hidden>
   <div class="sheet-card">
-    <header><h2 id="langTitle">选择语言</h2><button class="close" data-close="langSheet" type="button">✕</button></header>
+    <header><h2 id="langTitle">选择语言</h2><button class="close" data-close="langSheet" type="button" aria-label="关闭语言选择"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
     <div class="sheet-body list" id="langList"></div>
   </div>
 </div>
@@ -128,10 +130,10 @@
 <!-- 打字输入 -->
 <div class="sheet" id="typeSheet" hidden>
   <div class="sheet-card">
-    <header><h2>打字翻译</h2><button class="close" data-close="typeSheet" type="button">✕</button></header>
+    <header><h2>打字翻译</h2><button class="close" data-close="typeSheet" type="button" aria-label="关闭打字输入"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
     <div class="sheet-body">
       <textarea id="typeInput" rows="4" placeholder="输入要说的话…"></textarea>
-      <p class="hint">麦克风不可用时，用这个也能翻。</p>
+      <p class="hint">也可以用 iPhone 键盘上的麦克风听写，完成后点「翻译」。</p>
     </div>
     <footer><button class="primary" id="typeSend" type="button">翻译</button></footer>
   </div>
@@ -140,7 +142,7 @@
 <!-- 历史 -->
 <div class="sheet" id="historySheet" hidden>
   <div class="sheet-card">
-    <header><h2>对话记录</h2><button class="close" data-close="historySheet" type="button">✕</button></header>
+    <header><h2>对话记录</h2><button class="close" data-close="historySheet" type="button" aria-label="关闭对话记录"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
     <div class="sheet-body list" id="historyList"></div>
     <footer class="foot-row">
       <button class="ghost2" id="srtBtn" type="button">导出 SRT</button>
@@ -150,6 +152,6 @@
   </div>
 </div>
 
-<script src="app.js"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
