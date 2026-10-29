@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<title>随身翻译</title>
+<meta name="description" content="点一下说话，实时翻译成另一种语言；中间一键换方向。">
+<meta name="theme-color" content="#080c11">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="随身翻译">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div id="insecure" class="banner" hidden>
+  当前不是 HTTPS，麦克风会被系统拦掉。换成 <code>https</code> 地址打开（免费托管都自带），或先点 ⌨️ 打字。
+</div>
+
+<main id="app">
+  <header class="topbar">
+    <span class="brand">随身翻译</span>
+    <button class="icon-btn" id="openHistory" type="button" aria-label="对话记录">☰</button>
+    <button class="icon-btn" id="openSettings" type="button" aria-label="设置">⚙</button>
+  </header>
+
+  <section class="stage">
+    <div class="orig" data-orig></div>
+    <div class="trans" data-trans>点下面的麦克风开始</div>
+    <div class="status" data-state>待机</div>
+  </section>
+
+  <footer class="controls">
+    <div class="dirbar">
+      <button class="lang-btn" id="srcBtn" type="button">
+        <span class="lang-name" id="srcName">English</span>
+        <span class="lang-tag">说</span>
+      </button>
+      <button class="swap-btn" id="swap" type="button" aria-label="交换方向">⇄</button>
+      <button class="lang-btn" id="dstBtn" type="button">
+        <span class="lang-name" id="dstName">简体中文</span>
+        <span class="lang-tag">译成</span>
+      </button>
+    </div>
+
+    <div class="microw">
+      <button class="key-btn" id="openType" type="button" aria-label="打字输入">⌨️</button>
+      <button class="talk-btn" id="talk" type="button">
+        <span class="ico">🎙</span><span class="lbl">说话</span>
+      </button>
+      <span class="ghost-slot" aria-hidden="true"></span>
+    </div>
+  </footer>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+
+<!-- 设置 -->
+<div class="sheet" id="settingsSheet" hidden>
+  <div class="sheet-card">
+    <header><h2>设置</h2><button class="close" data-close="settingsSheet" type="button">✕</button></header>
+    <div class="sheet-body">
+      <label class="row">
+        <span>字号</span>
+        <input type="range" id="fontRange" min="22" max="64" step="2">
+        <output id="fontOut"></output>
+      </label>
+      <label class="row">
+        <span>显示原文</span>
+        <input type="checkbox" id="showOrig">
+      </label>
+      <label class="row">
+        <span>自动朗读译文</span>
+        <input type="checkbox" id="tts">
+      </label>
+      <p class="hint">朗读会用手机扬声器发声，可能被麦克风再次收进去，建议戴耳机或说话间隔开。</p>
+
+      <label class="row col">
+        <span>翻译引擎</span>
+        <select id="engine">
+          <option value="auto">自动（Google，失败退 MyMemory）</option>
+          <option value="google">Google（快、质量好）</option>
+          <option value="mymemory">MyMemory（免 key，有每日限额）</option>
+          <option value="custom">自定义 API（OpenAI 兼容）</option>
+        </select>
+      </label>
+
+      <div class="custom-box" id="customBox" hidden>
+        <label class="row col"><span>接口地址</span>
+          <input type="url" id="apiBase" placeholder="https://api.deepseek.com/v1" autocapitalize="off" autocorrect="off" spellcheck="false">
+        </label>
+        <label class="row col"><span>模型</span>
+          <input type="text" id="apiModel" placeholder="deepseek-chat" autocapitalize="off" autocorrect="off" spellcheck="false">
+        </label>
+        <label class="row col"><span>API Key</span>
+          <input type="password" id="apiKey" placeholder="sk-..." autocapitalize="off" autocorrect="off" spellcheck="false">
+        </label>
+        <p class="hint">Key 只存在这台手机的浏览器里，直接发给该接口，不经过任何中转。</p>
+      </div>
+
+      <label class="row col">
+        <span>MyMemory 邮箱（可选，提高免费额度）</span>
+        <input type="email" id="mmEmail" placeholder="you@example.com" autocapitalize="off" autocorrect="off" spellcheck="false">
+      </label>
+
+      <div class="row col">
+        <span>识别能力</span>
+        <p class="hint" id="capInfo">检测中…</p>
+      </div>
+    </div>
+    <footer><button class="primary" data-close="settingsSheet" type="button">完成</button></footer>
+  </div>
+</div>
+
+<!-- 语言选择 -->
+<div class="sheet" id="langSheet" hidden>
+  <div class="sheet-card">
+    <header><h2 id="langTitle">选择语言</h2><button class="close" data-close="langSheet" type="button">✕</button></header>
+    <div class="sheet-body list" id="langList"></div>
+  </div>
+</div>
+
+<!-- 打字输入 -->
+<div class="sheet" id="typeSheet" hidden>
+  <div class="sheet-card">
+    <header><h2>打字翻译</h2><button class="close" data-close="typeSheet" type="button">✕</button></header>
+    <div class="sheet-body">
+      <textarea id="typeInput" rows="4" placeholder="输入要说的话…"></textarea>
+      <p class="hint">麦克风不可用时，用这个也能翻。</p>
+    </div>
+    <footer><button class="primary" id="typeSend" type="button">翻译</button></footer>
+  </div>
+</div>
+
+<!-- 历史 -->
+<div class="sheet" id="historySheet" hidden>
+  <div class="sheet-card">
+    <header><h2>对话记录</h2><button class="close" data-close="historySheet" type="button">✕</button></header>
+    <div class="sheet-body list" id="historyList"></div>
+    <footer class="foot-row">
+      <button class="ghost2" id="srtBtn" type="button">导出 SRT</button>
+      <button class="ghost2" id="copyBtn" type="button">复制全部</button>
+      <button class="ghost2 danger" id="clearBtn" type="button">清空</button>
+    </footer>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
