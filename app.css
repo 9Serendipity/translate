@@ -70,6 +70,9 @@ body{display:flex;flex-direction:column;}
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
 }
 .orig:empty{display:none;}
+.live-input{margin-bottom:20px;padding-left:12px;border-left:2px solid rgba(55,230,255,.5);}
+.live-input > span{font-size:11px;color:var(--accent);}
+.live-input p{margin:6px 0 0;font-size:16px;line-height:1.45;color:#b8c9d8;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
 .trans{
   font-size:var(--trans-size);line-height:1.26;font-weight:600;
   letter-spacing:.1px;word-break:break-word;overflow-wrap:anywhere;
@@ -224,6 +227,15 @@ body{display:flex;flex-direction:column;}
 }
 textarea{resize:none;line-height:1.5;user-select:text;-webkit-user-select:text;}
 .hint{margin:2px 0 0;font-size:12px;line-height:1.5;color:rgba(242,247,251,.42);}
+.test-intro{font-size:15px;line-height:1.6;color:#dbe5ef;margin:8px 0;}
+.mic-meter-wrap{padding:20px 0 10px;}
+.meter-labels{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:#b7c9d8;margin-bottom:8px;font-variant-numeric:tabular-nums;}
+#micLevel{display:block;width:100%;height:18px;margin-bottom:8px;}
+#micLevel::-webkit-meter-bar{background:#202d38;border:0;border-radius:8px;}
+#micLevel::-webkit-meter-optimum-value{background:var(--accent);border-radius:8px;}
+.test-status{font-size:14px;line-height:1.5;color:var(--text);}
+#micPlayback{width:100%;margin:18px 0 8px;}
+.test-note{margin-top:18px;}
 
 .primary{
   width:100%;height:48px;border-radius:13px;border:none;font:inherit;font-size:16px;font-weight:600;
@@ -258,7 +270,7 @@ textarea{resize:none;line-height:1.5;user-select:text;-webkit-user-select:text;}
   .controls{flex-direction:row;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:4px calc(12px + var(--safe-r)) calc(8px + var(--safe-b)) calc(12px + var(--safe-l));}
   .speech-hint{flex-basis:100%;}
   .dirbar{flex:1;}
-  .microw{grid-template-columns:44px 150px;gap:10px;}
+  .microw{grid-template-columns:44px 150px 44px;gap:10px;}
   .ghost-slot{display:none;}
   .talk-btn{height:52px;font-size:16px;}
   .key-btn{width:44px;height:44px;}

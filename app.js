@@ -116,7 +116,12 @@
     if (!box) return;
     let size = settings.fontSize;
     node.style.fontSize = size + 'px';
-    const limit = Math.max(48, Math.round(box.clientHeight * 0.86));
+    const boxStyle = getComputedStyle(box);
+    const otherHeight = [...box.children].filter(child => child !== node && !child.hidden).reduce((height, child) => {
+      const style = getComputedStyle(child);
+      return height + child.getBoundingClientRect().height + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
+    }, 0);
+    const limit = Math.max(40, box.clientHeight - otherHeight - (parseFloat(boxStyle.paddingTop) || 0) - (parseFloat(boxStyle.paddingBottom) || 0) - 8);
     let guard = 0;
     while (node.scrollHeight > limit && size > 15 && guard++ < 40) {
       size -= 2;
@@ -132,28 +137,48 @@
 
   /* ---------------- 翻译 ---------------- */
   const cache = new Map();
-  const ckey = (from, to, text) => `${from}|${to}|${text}`;
+  const ckey = (from, to, text, config) => JSON.stringify([from, to, text, config.engine, config.apiBase, config.apiModel, config.apiKey, config.mmEmail]);
   const health = { googleFails: 0, googleSkipUntil: 0, lastOk: '', warned: false };
 
-  const hasCustom = () => !!(settings.apiKey && settings.apiBase);
 
-  function withTimeout(promise, ms, label) {
-    return Promise.race([
-      promise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} 超时`)), ms)),
-    ]);
+  const abortError = () => new DOMException('已取消', 'AbortError');
+
+  function runAttempt(operation, ms, label, parentSignal) {
+    return new Promise((resolve, reject) => {
+      const controller = new AbortController();
+      let settled = false;
+      let timer = 0;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        parentSignal?.removeEventListener('abort', cancelled);
+        callback(value);
+      };
+      const cancelled = () => { controller.abort(); finish(reject, abortError()); };
+      if (parentSignal?.aborted) { cancelled(); return; }
+      parentSignal?.addEventListener('abort', cancelled, { once: true });
+      timer = setTimeout(() => {
+        controller.abort();
+        finish(reject, new Error(`${label} 超时`));
+      }, ms);
+      Promise.resolve().then(() => operation(controller.signal)).then(
+        value => finish(resolve, value), error => finish(reject, error),
+      );
+    });
   }
 
-  async function customTranslate(text, from, to) {
-    const base = settings.apiBase.replace(/\/+$/, '');
+  async function customTranslate(text, from, to, { signal, config = settings } = {}) {
+    const base = config.apiBase.replace(/\/+$/, '');
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
+      signal,
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${settings.apiKey}`,
+        Authorization: `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify({
-        model: settings.apiModel || 'gpt-4o-mini',
+        model: config.apiModel || 'gpt-4o-mini',
         temperature: 0,
         messages: [
           {
@@ -171,57 +196,46 @@
     return out.replace(/^["“]|["”]$/g, '');
   }
 
-  async function googleTranslate(text, from, to) {
+  async function googleTranslate(text, from, to, { signal } = {}) {
     const url = 'https://translate.googleapis.com/translate_a/single'
       + `?client=gtx&sl=${encodeURIComponent(langOf(from).gtx)}`
       + `&tl=${encodeURIComponent(langOf(to).gtx)}&dt=t&q=${encodeURIComponent(text)}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal });
     if (!res.ok) throw new Error(`Google ${res.status}`);
     const data = await res.json();
     if (!Array.isArray(data?.[0])) throw new Error('Google 返回格式异常');
     return data[0].map((seg) => (seg && seg[0]) || '').join('').trim();
   }
 
-  // 不用 lookbehind：iOS 16.4 以下解析会在文件级直接报错
-  function splitSentences(text) {
+  function chunkText(text, max = 480) {
+    // MyMemory 限制的是 UTF-8 字节，中文不能按 JS 字符数切。
+    const encoder = new TextEncoder();
     const out = [];
     let buf = '';
-    for (const ch of text) {
-      buf += ch;
-      if ('。！？.!?\n'.indexOf(ch) >= 0) { out.push(buf); buf = ''; }
+    let bytes = 0;
+    for (const character of text) {
+      const size = encoder.encode(character).length;
+      if (buf && bytes + size > max) { out.push(buf); buf = ''; bytes = 0; }
+      buf += character;
+      bytes += size;
     }
     if (buf) out.push(buf);
     return out;
   }
 
-  function chunkText(text, max = 450) {
-    if (text.length <= max) return [text];
-    const out = [];
-    let buf = '';
-    for (const piece of splitSentences(text)) {
-      if ((buf + piece).length > max && buf) { out.push(buf); buf = piece; }
-      else buf += piece;
-    }
-    if (buf) out.push(buf);
-    return out.flatMap((p) => {
-      if (p.length <= max) return [p];
-      const cuts = [];
-      for (let i = 0; i < p.length; i += max - 10) cuts.push(p.slice(i, i + max - 10));
-      return cuts;
-    });
-  }
-
-  async function myMemoryTranslate(text, from, to) {
+  async function myMemoryTranslate(text, from, to, { signal, config = settings } = {}) {
     const pair = `${langOf(from).mm}|${langOf(to).mm}`;
     const pieces = chunkText(text);
     const outs = [];
     for (const piece of pieces) {
+      if (signal?.aborted) throw abortError();
       const q = new URLSearchParams({
         q: piece,
         langpair: pair,
-        ...(settings.mmEmail ? { de: settings.mmEmail } : {}),
+        ...(config.mmEmail ? { de: config.mmEmail } : {}),
       });
-      const res = await fetch(`https://api.mymemory.translated.net/get?${q}`);
+      const res = await fetch(`https://api.mymemory.translated.net/get?${q}`, { signal });
+      if (!res.ok) throw new Error(`MyMemory ${res.status}`);
       const data = await res.json();
       if (Number(data.responseStatus) !== 200) {
         throw new Error(data.responseDetails || `MyMemory ${data.responseStatus}`);
@@ -234,32 +248,35 @@
   /**
    * 依次尝试：自定义 → Google → MyMemory；返回 { text, engine }
    */
-  async function translate(text, from, to) {
+  async function translate(text, from, to, { signal } = {}) {
+    if (signal?.aborted) throw abortError();
     const clean = text.trim();
     if (!clean) return { text: '', engine: 'none' };
     if (from === to) return { text: clean, engine: 'none' };
 
-    const key = ckey(from, to, clean);
+    const config = { ...settings };
+    const key = ckey(from, to, clean, config);
     if (cache.has(key)) return cache.get(key);
 
-    const mode = settings.engine;
+    const mode = config.engine;
+    if (mode === 'custom' && !(config.apiBase && config.apiKey)) throw new Error('请先填写自定义接口地址和 API Key');
     const tries = [];
     const googleReady = Date.now() > health.googleSkipUntil;
     if (mode === 'custom') tries.push(['custom', customTranslate, 12000]);
-    else if (mode === 'mymemory') tries.push(['mymemory', myMemoryTranslate, 9000]);
+    else if (mode === 'mymemory') tries.push(['mymemory', myMemoryTranslate, 7000]);
     else if (mode === 'google') {
-      if (googleReady) tries.push(['google', googleTranslate, 5000]);
-      tries.push(['mymemory', myMemoryTranslate, 9000]);
+      if (googleReady) tries.push(['google', googleTranslate, 2200]);
+      tries.push(['mymemory', myMemoryTranslate, 7000]);
     } else {
-      if (hasCustom()) tries.push(['custom', customTranslate, 12000]);
-      if (googleReady) tries.push(['google', googleTranslate, 5000]);
-      tries.push(['mymemory', myMemoryTranslate, 9000]);
+      if (config.apiKey && config.apiBase) tries.push(['custom', customTranslate, 12000]);
+      if (googleReady) tries.push(['google', googleTranslate, 2200]);
+      tries.push(['mymemory', myMemoryTranslate, 7000]);
     }
 
     let lastErr = null;
     for (const [name, fn, timeout] of tries) {
       try {
-        const out = await withTimeout(fn(clean, from, to), timeout, name);
+        const out = await runAttempt(attemptSignal => fn(clean, from, to, { signal: attemptSignal, config }), timeout, name, signal);
         if (out) {
           const result = { text: out, engine: name };
           if (cache.size > 400) cache.clear();
@@ -269,11 +286,12 @@
           return result;
         }
       } catch (err) {
+        if (signal?.aborted || err.name === 'AbortError') throw abortError();
         lastErr = err;
         if (name === 'google') {
           health.googleFails += 1;
+          health.googleSkipUntil = Date.now() + (health.googleFails >= 2 ? 5 : 1) * 60 * 1000;
           if (health.googleFails >= 2) {
-            health.googleSkipUntil = Date.now() + 5 * 60 * 1000;
             if (!health.warned) {
               health.warned = true;
               toast('Google 翻译连不上，已自动改用 MyMemory。', 3600);
@@ -288,7 +306,7 @@
 
   /* ---------------- 朗读 ---------------- */
   function speak(text, langId) {
-    if (!settings.tts || !text) return;
+    if (!settings.tts || !text || state.listening || state.stopping) return;
     try {
       const u = new SpeechSynthesisUtterance(text);
       u.lang = langId;
@@ -306,12 +324,12 @@
     rec: null,
     buffer: '',
     interim: '',
-    prefix: '',
+    finalCount: 0,
+    heardText: false,
     started: false,
     sessionHadText: false,
     emptyEnds: 0,
     lastVoice: 0,
-    token: 0,
     wakeLock: null,
     restartTimer: 0,
     idleTimer: 0,
@@ -347,44 +365,39 @@
     $('#speechHint').textContent = text;
   }
 
-  function currentTranscript() {
-    return [state.buffer, state.interim].filter(Boolean).join(' ').trim();
-  }
-
-  let translateTimer = 0;
+  let typedRequest = null;
+  const subtitleFlow = new window.LivesubsSubtitleFlow({
+    translate,
+    languages: () => ({ from: settings.src, to: settings.dst }),
+    onDraft(text) {
+      $('#liveInput').hidden = !text;
+      $('#liveDraft').textContent = text;
+      fitAll();
+    },
+    onWorking(task) {
+      el.trans.classList.add('pending');
+      setStatus(task.preview ? '正在预览译文…' : '正在翻译…', state.listening);
+    },
+    onResult(task) {
+      setOrig(task.text);
+      setTrans(task.result.text, { pending: task.preview });
+      setStatus(task.preview ? '译文预览 · 等待句子确认' : `已译 ${task.ms}ms`, state.listening);
+      if (!task.preview) {
+        pushHistory(task.text, task.result.text, task.from, task.to);
+        speak(task.result.text, task.to);
+      }
+    },
+    onError(error, task) {
+      setOrig(task.text);
+      setTrans('这一句翻译失败', { placeholder: true });
+      setStatus('翻译失败');
+      toast(`翻译失败：${error.message || error}`, 4200);
+    },
+  });
 
   function queueTranslate(text, isFinal) {
-    const from = settings.src;
-    const to = settings.dst;
-
-    clearTimeout(translateTimer);
-    const token = ++state.token;
-    translateTimer = setTimeout(async () => {
-      if (!text.trim()) return;
-      // 已经有译文就先压暗，等新的回来再换
-      if (!el.trans.textContent.trim() || el.trans.classList.contains('placeholder')) {
-        setTrans('…', { pending: true });
-      } else {
-        el.trans.classList.add('pending');
-      }
-      const t0 = performance.now();
-      try {
-        const { text: out, engine } = await translate(text, from, to);
-        if (token !== state.token) return; // 已经有更新的一句
-        setTrans(out);
-        const ms = Math.round(performance.now() - t0);
-        setStatus(`${engine === 'none' ? '同语' : '已译'} ${ms}ms`, state.listening);
-        if (isFinal) {
-          pushHistory(text, out, from, to);
-          speak(out, to);
-        }
-      } catch (err) {
-        if (token !== state.token) return;
-        setTrans('翻译失败，换个引擎试试', { placeholder: true });
-        setStatus('翻译失败');
-        toast(`翻译失败：${err.message || err}`, 4200);
-      }
-    }, isFinal ? 260 : 520);
+    if (isFinal) subtitleFlow.commit(text);
+    else subtitleFlow.setDraft(text);
   }
 
   function newRecognizer() {
@@ -419,14 +432,19 @@
         if (r.isFinal) finals.push(t);
         else interim.push(t);
       }
-      state.buffer = [state.prefix, ...finals].filter(Boolean).join(' ').trim();
+      state.buffer = finals.filter(Boolean).join(' ').trim();
       state.interim = interim.filter(Boolean).join(' ').trim();
-      const live = currentTranscript();
-      if (!live) return;
+      const live = [state.buffer, state.interim].filter(Boolean).join(' ');
       state.sessionHadText = state.sessionHadText || finals.some(Boolean) || interim.some(Boolean);
-      state.emptyEnds = 0;
-      setOrig(live);
-      if (!state.stopping) queueTranslate(live, !state.interim);
+      state.heardText = state.heardText || !!live;
+      if (live) state.emptyEnds = 0;
+      // 已确认的结果只提交一次，不再把前面整段内容重复翻译。
+      for (let index = state.finalCount; index < finals.length; index += 1) {
+        subtitleFlow.commit(finals[index]);
+      }
+      state.finalCount = finals.length;
+      subtitleFlow.setDraft(state.interim);
+      if (state.stopping) subtitleFlow.hold();
     };
 
     rec.onerror = (event) => {
@@ -454,9 +472,9 @@
       if (!state.listening) return;
 
       // Safari 有时只给临时结果就结束。先保留文字，再开始下一段。
-      state.buffer = currentTranscript();
+      subtitleFlow.finish();
+      state.buffer = '';
       state.interim = '';
-      if (state.sessionHadText && state.buffer) queueTranslate(state.buffer, true);
       state.emptyEnds = state.sessionHadText ? 0 : state.emptyEnds + 1;
       if (state.emptyEnds >= 4) {
         finishListening();
@@ -466,7 +484,7 @@
       clearTimeout(state.restartTimer);
       state.restartTimer = setTimeout(() => {
         if (!state.listening || state.rec !== rec) return;
-        state.prefix = state.buffer;
+        state.finalCount = 0;
         state.sessionHadText = false;
         try {
           rec.start();
@@ -491,16 +509,18 @@
     }
 
     stopListening({ silent: true });
+    stopMicTest();
+    try { window.speechSynthesis?.cancel(); } catch { /* 无朗读服务 */ }
 
     state.listening = true;
     state.buffer = '';
     state.interim = '';
-    state.prefix = '';
+    state.finalCount = 0;
+    state.heardText = false;
     state.started = false;
     state.sessionHadText = false;
     state.emptyEnds = 0;
     state.lastVoice = Date.now();
-    state.token += 1;
 
     setOrig('');
     if (el.trans.classList.contains('placeholder')) setTrans('…', { pending: true });
@@ -534,8 +554,6 @@
     state.listening = false;
     clearTimeout(state.restartTimer);
     clearInterval(state.idleTimer);
-    clearTimeout(translateTimer);
-    state.token += 1;
 
     if (silent) { finishListening({ discard: true, abort: true }); return; }
     if (!wasListening || state.stopping) return;
@@ -543,6 +561,7 @@
 
     // stop 会尝试给出最后一句；立即 abort 会把这个结果丢掉。
     state.stopping = true;
+    subtitleFlow.hold();
     uiListening(false);
     el.talk.disabled = true;
     $('.lbl', el.talk).textContent = '收尾中';
@@ -555,7 +574,6 @@
     clearTimeout(state.stopTimer);
     clearTimeout(state.restartTimer);
     clearInterval(state.idleTimer);
-    const text = currentTranscript();
     const rec = state.rec;
     state.rec = null;
     state.listening = false;
@@ -568,16 +586,17 @@
     uiListening(false);
     releaseAwake();
     if (discard) {
+      subtitleFlow.reset();
+      typedRequest?.abort();
+      typedRequest = null;
       el.trans.classList.remove('pending');
       return;
     }
     setSpeechHint();
-    if (text) {
-      state.buffer = text;
-      state.interim = '';
-      setOrig(text);
-      setStatus('正在翻译…');
-      queueTranslate(text, true);
+    subtitleFlow.finish();
+    state.interim = '';
+    if (state.heardText) {
+      setStatus(subtitleFlow.pending ? '正在翻译…' : '已停止收音');
     } else {
       setTrans('还没有收到语音', { placeholder: true });
       setStatus('未收到识别文字');
@@ -586,10 +605,8 @@
   }
 
   function failRecognition(title, message) {
-    const text = currentTranscript();
-    stopListening({ silent: true });
-    if (text) { setOrig(text); queueTranslate(text, true); }
-    else setTrans(title, { placeholder: true });
+    finishListening({ abort: true });
+    if (!state.heardText) setTrans(title, { placeholder: true });
     setStatus(title);
     setSpeechHint(message);
     toast(message, 5200);
@@ -601,11 +618,75 @@
     else startListening();
   }
 
+  /* ---------------- 独立收音测试 ---------------- */
+  let micObjectUrl = '';
+  const micTest = new window.LivesubsMicTest({
+    onState(phase, message, detail = {}) {
+      $('#micTestStatus').textContent = message;
+      $('#micRecord').disabled = phase === 'finishing';
+      $('#micRecord').textContent = ['recording', 'requesting'].includes(phase) ? '停止录音' : phase === 'finishing' ? '生成回放中' : '开始录音';
+      $('#micMode').disabled = ['recording', 'requesting', 'finishing'].includes(phase);
+      if (phase === 'requesting') {
+        $('#micPlayback').pause();
+        $('#micPlayback').removeAttribute('src');
+        $('#micPlayback').hidden = true;
+        if (micObjectUrl) URL.revokeObjectURL(micObjectUrl);
+        micObjectUrl = '';
+        $('#micLevel').value = 0;
+        $('#micLevelLabel').textContent = '等待麦克风';
+        $('#micElapsed').textContent = '0.0 / 10 秒';
+        $('#micActual').textContent = '';
+      }
+      if (phase === 'recording') {
+        const names = { autoGainControl: '自动音量', noiseSuppression: '降噪', echoCancellation: '回声处理' };
+        const bits = Object.entries(names).filter(([key]) => typeof detail.settings[key] === 'boolean')
+          .map(([key, label]) => `${label}：${detail.settings[key] ? '开' : '关'}`);
+        $('#micActual').textContent = bits.length ? `设备报告 · ${bits.join(' · ')}` : '设备未报告处理设置，所选模式可能未生效。';
+      }
+    },
+    onLevel(level, elapsed) {
+      $('#micElapsed').textContent = `${elapsed.toFixed(1)} / 10 秒`;
+      $('#micLevel').value = level ?? 0;
+      $('#micLevelLabel').textContent = level === null ? '此设备未提供实时音量，请录完后回放' : level < 12 ? '接近静音' : level < 35 ? '声音较小' : level < 75 ? '有声音' : '声音较强';
+    },
+    onRecording(blob) {
+      if (micObjectUrl) URL.revokeObjectURL(micObjectUrl);
+      micObjectUrl = URL.createObjectURL(blob);
+      $('#micPlayback').src = micObjectUrl;
+      $('#micPlayback').hidden = false;
+    },
+  });
+
+  function stopMicTest() {
+    const wasActive = micTest.running || micTest.waiting || !!micTest.recorder;
+    micTest.cancel();
+    $('#micPlayback').pause();
+    $('#micRecord').disabled = false;
+    $('#micRecord').textContent = '开始录音';
+    $('#micMode').disabled = false;
+    if (wasActive) {
+      $('#micTestStatus').textContent = '测试已停止，可重新录音。';
+      $('#micLevelLabel').textContent = '已停止收音';
+      $('#micLevel').value = 0;
+    }
+  }
+
+  function openMicTest() {
+    stopListening({ silent: true });
+    closeSheet('settingsSheet');
+    setStatus('收音测试 · 翻译已暂停');
+    setSpeechHint('录音只在本页回放，不会上传');
+    openSheet('micTestSheet');
+  }
+
+  function toggleMicTest() {
+    if (micTest.running || micTest.waiting) micTest.stop();
+    else micTest.start($('#micMode').value);
+  }
+
   /* ---------------- 历史 ---------------- */
   function pushHistory(orig, trans, from, to) {
     if (!orig || !trans) return;
-    const last = history[history.length - 1];
-    if (last && last.orig === orig) return; // 去重
     history.push({ orig, trans, from, to, ts: Date.now() });
     if (history.length > 200) history = history.slice(-200);
     persist();
@@ -678,10 +759,13 @@
 
   /* ---------------- 抽屉 ---------------- */
   function openSheet(id) { $(`#${id}`).hidden = false; }
-  function closeSheet(id) { $(`#${id}`).hidden = true; }
+  function closeSheet(id) {
+    $(`#${id}`).hidden = true;
+    if (id === 'micTestSheet') { stopMicTest(); setSpeechHint(); setStatus('待机'); }
+  }
 
   $$('.sheet').forEach((sheet) => {
-    sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.hidden = true; });
+    sheet.addEventListener('click', (e) => { if (e.target === sheet) closeSheet(sheet.id); });
   });
   $$('[data-close]').forEach((btn) => {
     btn.addEventListener('click', () => closeSheet(btn.dataset.close));
@@ -701,6 +785,7 @@
     }).join('');
     $$('.lang-item', list).forEach((btn) => {
       btn.addEventListener('click', () => {
+        stopListening({ silent: true });
         const id = btn.dataset.id;
         if (target === 'src') {
           settings.src = id;
@@ -712,7 +797,6 @@
         persist();
         renderLangs();
         closeSheet('langSheet');
-        stopListening({ silent: true });
       });
     });
     openSheet('langSheet');
@@ -748,6 +832,7 @@
     });
     $('#tts').addEventListener('change', (e) => { settings.tts = e.target.checked; persist(); });
     $('#engine').addEventListener('change', (e) => {
+      stopListening({ silent: true });
       settings.engine = e.target.value;
       $('#customBox').hidden = settings.engine !== 'custom';
       persist();
@@ -755,6 +840,7 @@
     ['apiBase', 'apiModel', 'apiKey', 'mmEmail'].forEach((id) => {
       const elx = $('#' + id);
       elx.addEventListener('change', () => {
+        stopListening({ silent: true });
         settings[id] = elx.value.trim();
         persist();
       });
@@ -783,18 +869,26 @@
     const text = $('#typeInput').value.trim();
     if (!text) return;
     stopListening({ silent: true });
+    const controller = new AbortController();
+    typedRequest = controller;
+    const from = settings.src, to = settings.dst;
     closeSheet('typeSheet');
     setOrig(text);
     setTrans('…', { pending: true });
+    setStatus('正在翻译…');
     try {
-      const { text: out } = await translate(text, settings.src, settings.dst);
+      const { text: out } = await translate(text, from, to, { signal: controller.signal });
+      if (typedRequest !== controller || controller.signal.aborted) return;
       setTrans(out);
       setStatus('已译');
-      pushHistory(text, out, settings.src, settings.dst);
-      speak(out, settings.dst);
+      pushHistory(text, out, from, to);
+      speak(out, to);
     } catch (err) {
+      if (controller.signal.aborted || typedRequest !== controller) return;
       setTrans('翻译失败', { placeholder: true });
       toast(`翻译失败：${err.message || err}`);
+    } finally {
+      if (typedRequest === controller) typedRequest = null;
     }
   }
 
@@ -804,6 +898,9 @@
     $('#srcBtn').addEventListener('click', () => openLangPicker('src'));
     $('#dstBtn').addEventListener('click', () => openLangPicker('dst'));
     $('#openType').addEventListener('click', openType);
+    $('#openMicTest').addEventListener('click', openMicTest);
+    $('#testMicSettings').addEventListener('click', openMicTest);
+    $('#micRecord').addEventListener('click', toggleMicTest);
 
     $('#swap').addEventListener('click', () => {
       stopListening({ silent: true });
@@ -831,9 +928,15 @@
     });
 
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) stopListening({ silent: true });
+      if (document.hidden) {
+        if (state.listening || state.stopping) finishListening({ abort: true });
+        stopMicTest();
+      }
     });
-    window.addEventListener('pagehide', () => stopListening({ silent: true }));
+    window.addEventListener('pagehide', () => {
+      if (state.listening || state.stopping) finishListening({ abort: true });
+      stopMicTest();
+    });
   }
 
   /* ---------------- 启动 ---------------- */
@@ -852,15 +955,13 @@
     setStatus('待机');
 
     // 开机探一次 Google：国内基本连不上，先把断路器打开，别让第一句干等超时
-    if (navigator.onLine) {
+    if (navigator.onLine && ['auto', 'google'].includes(settings.engine)) {
       (async () => {
         try {
-          await withTimeout(googleTranslate('hello', 'en-US', 'zh-CN'), 3000, 'google');
-          health.lastOk = 'google';
+          await runAttempt(signal => googleTranslate('hello', 'en-US', 'zh-CN', { signal }), 1800, 'Google');
         } catch {
           health.googleFails = 2;
           health.googleSkipUntil = Date.now() + 5 * 60 * 1000;
-          health.lastOk = 'mymemory';
         }
       })();
     }
