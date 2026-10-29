@@ -375,13 +375,18 @@
       fitAll();
     },
     onWorking(task) {
+      if (task.segment || !task.preview) { setOrig(task.text); fitAll(); }
       el.trans.classList.add('pending');
-      setStatus(task.preview ? '正在预览译文…' : '正在翻译…', state.listening);
+      setStatus(task.preview && !task.segment ? '正在预览译文…' : '正在翻译…', state.listening);
     },
     onResult(task) {
-      setOrig(task.text);
-      setTrans(task.result.text, { pending: task.preview });
-      setStatus(task.preview ? '译文预览 · 等待句子确认' : `已译 ${task.ms}ms`, state.listening);
+      if (task.render !== false) {
+        setOrig(task.text);
+        setTrans(task.result.text, { pending: task.preview && !task.segment });
+      } else if (el.orig.textContent === task.text) {
+        el.trans.classList.remove('pending');
+      }
+      setStatus(task.preview ? '实时译文' : `已译 ${task.ms}ms`, state.listening);
       if (!task.preview) {
         pushHistory(task.text, task.result.text, task.from, task.to);
         speak(task.result.text, task.to);
@@ -418,6 +423,9 @@
       if (state.rec !== rec || !state.listening) return;
       state.lastVoice = Date.now();
       setStatus('收到声音，正在识别…', true);
+    };
+    rec.onspeechend = () => {
+      if (state.rec === rec && state.listening) subtitleFlow.flushPreview(true);
     };
 
     rec.onresult = (event) => {
@@ -580,7 +588,7 @@
     state.stopping = false;
     if (rec) {
       rec.onstart = rec.onresult = rec.onerror = rec.onend = null;
-      rec.onsoundstart = rec.onspeechstart = null;
+      rec.onsoundstart = rec.onspeechstart = rec.onspeechend = null;
       if (abort) { try { rec.abort(); } catch { /* noop */ } }
     }
     uiListening(false);
