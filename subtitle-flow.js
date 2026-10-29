@@ -152,7 +152,10 @@
     }
 
     commit(text) {
-      const parts = this.sentences(text);
+      const clean = text.trim();
+      const ready = this.earlySegments(clean, clean);
+      const end = ready.at(-1)?.end || 0;
+      const parts = [...ready.map(part => part.text), ...this.sentences(clean.slice(end))];
       if (!parts.length) return;
       const languages = this.languages();
       const promoted = this.active?.preview && parts.length === 1 && this.active.text === parts[0]

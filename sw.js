@@ -1,13 +1,13 @@
 /* 同源静态资源：先走网络，失败再退缓存。
    （翻译接口是跨域的，一律不拦。） */
-const CACHE = 'livesubs-v7';
+const CACHE = 'livesubs-v8';
 const ASSETS = [
   './',
   './index.html',
-  './app.css?v=7',
-  './subtitle-flow.js?v=7',
-  './mic-test.js?v=7',
-  './app.js?v=7',
+  './app.css?v=8',
+  './subtitle-flow.js?v=8',
+  './mic-test.js?v=8',
+  './app.js?v=8',
   './manifest.webmanifest',
   './icons/icon-180.png',
   './icons/icon-192.png',
