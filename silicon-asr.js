@@ -106,7 +106,7 @@
         this.gain = context.createGain();
         this.gain.gain.value = 0;
         if (context.audioWorklet && typeof AudioWorkletNode === 'function') {
-          await context.audioWorklet.addModule('pcm-capture.js?v=12');
+          await context.audioWorklet.addModule('pcm-capture.js?v=13');
           if (generation !== this.generation) return;
           this.capture = new AudioWorkletNode(context, 'livesubs-capture', { channelCount: 1, channelCountMode: 'explicit', numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
           this.capture.onprocessorerror = () => { if (generation === this.generation) this.fail('音频采样中断，已停止收音，请重新点说话。'); };
