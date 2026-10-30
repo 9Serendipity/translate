@@ -24,7 +24,7 @@
 
 语音识别默认选硅基流动 SenseVoiceSmall，需在设置里填写自己的硅基流动 API Key；也可以切回免 Key 的系统语音识别。
 翻译默认走 Google，连不上自动退 MyMemory，
-也可以在设置里填自己的 DeepSeek / OpenAI key 换更高质量。
+也可以选择「硅基流动 · DeepSeek Flash」，或填写自己的 DeepSeek / OpenAI 兼容接口。
 
 请把手机靠近说话人或另一台设备的外放音源，左侧语言必须与说话语言一致。
 系统识别使用 Safari 语音引擎；硅基流动模式由网页录音并请求浏览器启用自动音量、降噪和回声消除，设备可能忽略设置。
@@ -46,6 +46,14 @@ SenseVoiceSmall 支持普通话、粤语、英语、日语和韩语，接口自�
 录音期间暂停自动朗读，避免回声。停止按钮会等待最后一段采样和识别完成。
 
 Key 只发送到固定的 `api.siliconflow.cn`；旧版其他供应商的 Key 不会用于此接口，已有对话记录会保留。语音识别 Key 与自定义翻译 Key 分别配置。
+
+### 硅基流动 DeepSeek 翻译
+
+设置 → 翻译引擎 →「硅基流动 · DeepSeek Flash」，填写自己的「硅基流动翻译 API Key」后点完成。可以填写与语音识别相同的硅基流动 Key，两处分别配置。
+
+翻译使用 `https://api.siliconflow.cn/v1/chat/completions`，模型为 `deepseek-ai/DeepSeek-V4.1-Flash`，关闭思考模式。根据 [官方升级公告](https://api-docs.siliconflow.cn/docs/release-notes/overview)，该模型 ID 当前由 1017 版提供服务，模型 ID 保持不变。
+
+翻译 Key 默认只保存在当前会话；勾选「在这台手机记住翻译 Key」后才存到当前浏览器本地。Key 和原文直接发给硅基流动，翻译按模型输入和输出用量计费，以 [平台价格](https://www.siliconflow.cn/pricing) 为准。选择该引擎时不会自动转发给其他翻译服务；接口无效、余额不足和限流会明确提示。
 
 ### 系统识别与独立测试
 

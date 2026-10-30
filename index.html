@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png" sizes="192x192">
-<link rel="stylesheet" href="app.css?v=11">
+<link rel="stylesheet" href="app.css?v=12">
 </head>
 <body>
 
@@ -115,9 +115,19 @@
           <option value="auto">自动（Google，失败退 MyMemory）</option>
           <option value="google">Google（快、质量好）</option>
           <option value="mymemory">MyMemory（免 key，有每日限额）</option>
+          <option value="siliconflow">硅基流动 · DeepSeek Flash</option>
           <option value="custom">自定义 API（OpenAI 兼容）</option>
         </select>
       </label>
+
+      <div class="custom-box" id="siliconTranslateBox" hidden>
+        <div class="row col"><span>翻译模型</span><p class="hint">DeepSeek V4.1 Flash · 关闭深度思考，直接返回译文。</p></div>
+        <label class="row col"><span>硅基流动翻译 API Key</span><input type="password" id="siliconTranslateKey" placeholder="填写你的硅基流动 Key" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="row"><span>在这台手机记住翻译 Key</span><input type="checkbox" id="siliconTranslateRemember"></label>
+        <p class="hint">可以填写与语音识别相同的硅基流动 Key。默认只用于本次会话，勾选后保存在这台手机浏览器。</p>
+        <p class="hint">原文直接发送到硅基流动翻译，按模型输入和输出用量计费。</p>
+        <p class="hint"><a href="https://cloud.siliconflow.cn/account/ak" target="_blank" rel="noopener noreferrer">去硅基流动创建 Key ↗</a> · <a href="https://www.siliconflow.cn/pricing" target="_blank" rel="noopener noreferrer">查看模型价格 ↗</a></p>
+      </div>
 
       <div class="custom-box" id="customBox" hidden>
         <label class="row col"><span>接口地址</span>
@@ -200,9 +210,9 @@
   </div>
 </div>
 
-<script src="subtitle-flow.js?v=11"></script>
-<script src="mic-test.js?v=11"></script>
-<script src="silicon-asr.js?v=11"></script>
-<script src="app.js?v=11"></script>
+<script src="subtitle-flow.js?v=12"></script>
+<script src="mic-test.js?v=12"></script>
+<script src="silicon-asr.js?v=12"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>
