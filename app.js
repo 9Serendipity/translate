@@ -40,9 +40,8 @@
     apiModel: '',
     apiKey: '',
     mmEmail: '',
-    asrEngine: 'groq',
-    groqModel: 'whisper-large-v3',
-    groqRemember: false,
+    asrEngine: 'siliconflow',
+    siliconRemember: false,
   };
 
   const store = {
@@ -56,17 +55,21 @@
 
   const saved = store.read();
   const settings = { ...DEFAULTS, ...(saved.settings || {}) };
-  let groqKey = saved.groqKey || '';
-  try { if (!settings.groqRemember) groqKey = sessionStorage.getItem('livesubs.groqKey') || ''; } catch { /* 仅内存 */ }
+  // 旧版 AI 选项迁移到硅基流动，凭据按供应商分别读取。
+  if (!['siliconflow', 'system'].includes(settings.asrEngine)) settings.asrEngine = 'siliconflow';
+  delete settings.groqModel;
+  delete settings.groqRemember;
+  let siliconKey = saved.siliconKey || '';
+  try { if (!settings.siliconRemember) siliconKey = sessionStorage.getItem('livesubs.siliconKey') || ''; } catch { /* 仅内存 */ }
   const pageSession = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   let historySequence = 0;
   let history = Array.isArray(saved.history) ? saved.history.slice(-HISTORY_LIMIT).map((item, index) => ({ ...item, id: item.id || `saved:${item.ts}:${index}` })) : [];
 
   const persist = () => {
-    store.write({ settings, history, ...(settings.groqRemember && groqKey ? { groqKey } : {}) });
+    store.write({ settings, history, ...(settings.siliconRemember && siliconKey ? { siliconKey } : {}) });
     try {
-      if (!settings.groqRemember && groqKey) sessionStorage.setItem('livesubs.groqKey', groqKey);
-      else sessionStorage.removeItem('livesubs.groqKey');
+      if (!settings.siliconRemember && siliconKey) sessionStorage.setItem('livesubs.siliconKey', siliconKey);
+      else sessionStorage.removeItem('livesubs.siliconKey');
     } catch { /* 仅内存 */ }
   };
 
@@ -390,7 +393,7 @@
     if (!on) setStatus('待机', false);
   }
 
-  function setSpeechHint(text = `${settings.asrEngine === 'groq' ? 'Groq AI 识别' : '系统语音识别'} · 请说 ${srcLang().native}`) {
+  function setSpeechHint(text = `${settings.asrEngine === 'siliconflow' ? '硅基流动 AI 识别' : '系统语音识别'} · 请说 ${srcLang().native}`) {
     $('#speechHint').textContent = text;
   }
 
@@ -432,13 +435,13 @@
     },
   });
 
-  const groqASR = new window.LivesubsGroqASR({
+  const siliconASR = new window.LivesubsSiliconASR({
     onState(phase, message) {
       if (!state.cloud) return;
       if (phase === 'stopped') { finishListening(); return; }
       setSpeechHint(message);
-      if (phase === 'listening') setStatus(`Groq 正在听 ${srcLang().native}…`, true);
-      else if (phase === 'recognizing') setStatus('Groq 正在识别…', state.listening);
+      if (phase === 'listening') setStatus(`硅基流动正在听 ${srcLang().native}…`, true);
+      else if (phase === 'recognizing') setStatus('硅基流动正在识别…', state.listening);
       else if (phase === 'finishing') {
         state.listening = false;
         state.stopping = true;
@@ -449,7 +452,7 @@
       }
     },
     onLevel(value) {
-      if (state.cloud) $('#groqLevel').value = value;
+      if (state.cloud) $('#siliconLevel').value = value;
     },
     onText(text) {
       if (!state.cloud) return;
@@ -459,18 +462,18 @@
     },
     onError(error) {
       if (!state.cloud) return;
-      failRecognition('Groq 识别已停止', error.message);
+      failRecognition('硅基流动识别已停止', error.message);
     },
   });
 
-  function startGroqListening() {
+  function startSiliconListening() {
     if (!window.isSecureContext) { toast('麦克风需要 HTTPS，请打开在线地址。'); return; }
-    if (!groqKey) {
+    if (!siliconKey) {
       syncSettingsUI();
       $('#capInfo').textContent = capabilityText();
       openSheet('settingsSheet');
-      $('#groqKey').focus();
-      toast('请先填写你自己的 Groq API Key，再点说话。', 4200);
+      $('#siliconKey').focus();
+      toast('请先填写你自己的硅基流动API Key，再点说话。', 4200);
       return;
     }
     stopListening({ silent: true });
@@ -481,11 +484,11 @@
     state.lastVoice = Date.now();
     clearCurrent();
     uiListening(true);
-    $('#groqCapture').hidden = false;
-    $('#groqLevel').value = 0;
-    setStatus('正在启动 Groq 收音…', true);
+    $('#siliconCapture').hidden = false;
+    $('#siliconLevel').value = 0;
+    setStatus('正在启动硅基流动收音…', true);
     keepAwake();
-    groqASR.start({ key: groqKey, model: settings.groqModel, language: settings.src });
+    siliconASR.start({ key: siliconKey, language: settings.src });
   }
 
   function queueTranslate(text, isFinal) {
@@ -594,7 +597,7 @@
   }
 
   function startListening() {
-    if (settings.asrEngine === 'groq') { startGroqListening(); return; }
+    if (settings.asrEngine === 'siliconflow') { startSiliconListening(); return; }
     if (!SR) {
       setSpeechHint('请用 Safari 打开；也可点左下角用键盘听写');
       toast('当前浏览器没有可用的语音识别。请用 Safari 打开，或用键盘听写。', 4600);
@@ -654,7 +657,7 @@
       uiListening(false);
       el.talk.disabled = true;
       $('.lbl', el.talk).textContent = '收尾中';
-      groqASR.stop();
+      siliconASR.stop();
       return;
     }
     state.listening = false;
@@ -680,9 +683,9 @@
     clearTimeout(state.stopTimer);
     clearTimeout(state.restartTimer);
     clearInterval(state.idleTimer);
-    groqASR.cancel();
+    siliconASR.cancel();
     state.cloud = false;
-    $('#groqCapture').hidden = true;
+    $('#siliconCapture').hidden = true;
     const rec = state.rec;
     state.rec = null;
     state.listening = false;
@@ -958,10 +961,9 @@
   /* ---------------- 设置面板 ---------------- */
   function syncSettingsUI() {
     $('#asrEngine').value = settings.asrEngine;
-    $('#groqBox').hidden = settings.asrEngine !== 'groq';
-    $('#groqKey').value = groqKey;
-    $('#groqModel').value = settings.groqModel;
-    $('#groqRemember').checked = settings.groqRemember;
+    $('#siliconBox').hidden = settings.asrEngine !== 'siliconflow';
+    $('#siliconKey').value = siliconKey;
+    $('#siliconRemember').checked = settings.siliconRemember;
     $('#fontRange').value = settings.fontSize;
     $('#fontOut').textContent = settings.fontSize + 'px';
     $('#showOrig').checked = settings.showOrig;
@@ -979,22 +981,17 @@
     $('#asrEngine').addEventListener('change', e => {
       stopListening({ silent: true });
       settings.asrEngine = e.target.value;
-      $('#groqBox').hidden = settings.asrEngine !== 'groq';
+      $('#siliconBox').hidden = settings.asrEngine !== 'siliconflow';
       persist();
       setSpeechHint();
     });
-    $('#groqKey').addEventListener('change', e => {
+    $('#siliconKey').addEventListener('change', e => {
       stopListening({ silent: true });
-      groqKey = e.target.value.trim();
+      siliconKey = e.target.value.trim();
       persist();
     });
-    $('#groqModel').addEventListener('change', e => {
-      stopListening({ silent: true });
-      settings.groqModel = e.target.value;
-      persist();
-    });
-    $('#groqRemember').addEventListener('change', e => {
-      settings.groqRemember = e.target.checked;
+    $('#siliconRemember').addEventListener('change', e => {
+      settings.siliconRemember = e.target.checked;
       persist();
     });
     $('#fontRange').addEventListener('input', (e) => {
@@ -1030,7 +1027,7 @@
   function capabilityText() {
     const bits = [];
     bits.push(SR ? '系统语音识别：可用' : '系统语音识别：不可用');
-    bits.push(`Groq：${groqKey ? '已填写 Key' : '请填写 Key'}`);
+    bits.push(`硅基流动：${siliconKey ? '已填写 Key' : '请填写 Key'}`);
     bits.push(window.isSecureContext ? '安全上下文：是' : '安全上下文：否（麦克风会被拦）');
     bits.push(navigator.onLine ? '网络：在线' : '网络：离线');
     if (health.lastOk) bits.push(`上次翻译走：${health.lastOk}`);

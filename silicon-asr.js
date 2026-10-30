@@ -1,8 +1,8 @@
-/* Groq ASR：本机采样、短段 WAV、顺序识别；Key 只发往固定的 Groq 接口。 */
+/* 硅基流动 ASR：本机采样、短段 WAV、顺序识别；Key 只发往固定的硅基流动接口。 */
 (() => {
   'use strict';
   const RATE = 16000;
-  const ENDPOINT = 'https://api.groq.com/openai/v1/audio/transcriptions';
+  const ENDPOINT = 'https://api.siliconflow.cn/v1/audio/transcriptions';
 
   function wav(samples) {
     const buffer = new ArrayBuffer(44 + samples.length * 2), view = new DataView(buffer);
@@ -23,7 +23,7 @@
     return new Blob([buffer], { type: 'audio/wav' });
   }
 
-  class GroqASR {
+  class SiliconASR {
     constructor({ onState = () => {}, onLevel = () => {}, onText = () => {}, onError = () => {} } = {}) {
       Object.assign(this, { onState, onLevel, onText, onError });
       this.generation = 0;
@@ -31,7 +31,7 @@
       this.stream = this.context = this.source = this.capture = this.gain = null;
       this.active = null;
       this.queue = [];
-      this.requests = [];
+      this.lastRequestAt = -Infinity;
       this.timer = this.idleTimer = this.flushTimer = 0;
       this.captureDone = true;
       this.resetSamples();
@@ -67,7 +67,7 @@
       this.queue = [];
       this.releaseAudio();
       this.resetSamples();
-      this.key = this.prompt = '';
+      this.key = '';
     }
 
     fail(message) {
@@ -75,19 +75,20 @@
       this.onError(new Error(message));
     }
 
-    async start({ key, model = 'whisper-large-v3', language = 'en' }) {
+    async start({ key, language = 'en' }) {
       this.cancel();
       const generation = this.generation;
-      if (!key?.trim()) { this.onError(new Error('请先在设置中填写 Groq API Key。')); return; }
+      if (!key?.trim()) { this.onError(new Error('请先在设置中填写硅基流动API Key。')); return; }
+      if (!['zh', 'en', 'ja', 'ko', 'yue'].includes(language.split('-')[0])) {
+        this.onError(new Error('SenseVoiceSmall 支持中文、英语、日语、韩语和粤语；其他语言请切换系统语音识别。'));
+        return;
+      }
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC || !navigator.mediaDevices?.getUserMedia) { this.onError(new Error('当前浏览器无法录音，请用 Safari 打开。')); return; }
       this.key = key.trim();
-      this.model = model === 'whisper-large-v3-turbo' ? model : 'whisper-large-v3';
-      this.language = language.split('-')[0];
-      this.prompt = '';
       this.waiting = true;
       this.captureDone = false;
-      this.onState('requesting', '请允许麦克风，音频将直接发送到 Groq 识别。');
+      this.onState('requesting', '请允许麦克风，音频将直接发送到硅基流动识别。');
       try {
         // 在点击手势中创建和恢复，兼容 iPhone 的音频启动要求。
         const context = new AC();
@@ -105,7 +106,7 @@
         this.gain = context.createGain();
         this.gain.gain.value = 0;
         if (context.audioWorklet && typeof AudioWorkletNode === 'function') {
-          await context.audioWorklet.addModule('pcm-capture.js?v=10');
+          await context.audioWorklet.addModule('pcm-capture.js?v=11');
           if (generation !== this.generation) return;
           this.capture = new AudioWorkletNode(context, 'livesubs-capture', { channelCount: 1, channelCountMode: 'explicit', numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
           this.capture.onprocessorerror = () => { if (generation === this.generation) this.fail('音频采样中断，已停止收音，请重新点说话。'); };
@@ -126,7 +127,7 @@
         this.running = true;
         this.waiting = false;
         this.lastVoice = performance.now();
-        this.onState('listening', 'Groq 正在收音，停顿时尽快识别；连续讲话约每 8 秒处理一次。');
+        this.onState('listening', '硅基流动正在收音，停顿时尽快识别；连续讲话约每 8 秒处理一次。');
         this.idleTimer = setInterval(() => {
           if (this.running && performance.now() - this.lastVoice > 30000) this.stop();
         }, 1000);
@@ -137,7 +138,7 @@
           NotFoundError: '没有找到麦克风，请检查耳机和音频输入。',
           NotReadableError: '麦克风被占用，请关闭其他录音后重试。',
         };
-        this.fail(messages[error.name] || '无法启动 Groq 收音，请重新打开 Safari 后重试。');
+        this.fail(messages[error.name] || '无法启动硅基流动收音，请重新打开 Safari 后重试。');
       }
     }
 
@@ -202,10 +203,9 @@
         if (this.finishing && this.captureDone) { this.finishing = false; this.key = ''; this.onState('stopped', '已停止收音。'); }
         return;
       }
-      // 对同一页面的请求采用滚动窗口限速，保留跨会话记录，短句不会突发挤爆免费档。
+      // 请求顺序发送并留出最小间隔；实际账户限额由硅基流动判定。
       const now = performance.now();
-      this.requests = this.requests.filter(at => now - at < 60000);
-      const delay = Math.max(0, (this.requests.at(-1) ?? -Infinity) + 3100 - now, this.requests.length >= 20 ? this.requests[0] + 60050 - now : 0);
+      const delay = Math.max(0, this.lastRequestAt + 1200 - now);
       if (delay > 0) {
         const generation = this.generation;
         this.timer = setTimeout(() => { this.timer = 0; if (generation === this.generation) this.pump(); }, delay);
@@ -214,36 +214,36 @@
       const task = this.queue.shift(), controller = new AbortController(), generation = this.generation;
       const active = { task, controller };
       this.active = active;
-      this.requests.push(now);
-      this.onState('recognizing', this.finishing ? '正在识别最后一段…' : 'Groq 正在识别，麦克风继续收音…');
+      this.lastRequestAt = now;
+      this.onState('recognizing', this.finishing ? '正在识别最后一段…' : '硅基流动正在识别，麦克风继续收音…');
       let timedOut = false;
       const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 20000);
       const form = new FormData();
       form.append('file', task.audio, 'speech.wav');
-      form.append('model', this.model);
-      form.append('language', this.language);
-      form.append('response_format', 'verbose_json');
-      form.append('temperature', '0');
-      if (this.prompt) form.append('prompt', this.prompt);
+      form.append('model', 'FunAudioLLM/SenseVoiceSmall');
       fetch(ENDPOINT, { method: 'POST', headers: { Authorization: `Bearer ${this.key}` }, body: form, signal: controller.signal, credentials: 'omit' })
         .then(async response => {
           if (!response.ok) {
-            const messages = { 401: 'Groq Key 无效，请在设置中检查或重新创建。', 403: 'Groq 拒绝了访问，请检查账户、模型权限和当前网络。', 429: 'Groq 请求或免费额度已达上限，已停止收音，请稍后再试。' };
-            throw new Error(messages[response.status] || `Groq 识别失败（${response.status}），已停止收音。`);
+            const messages = {
+              401: '硅基流动 Key 无效，请填写硅基流动控制台创建的 Key。',
+              403: '硅基流动拒绝了访问，请检查实名认证和模型权限。',
+              404: '硅基流动暂未提供 SenseVoiceSmall，请检查平台模型状态。',
+              429: '硅基流动请求达到限速，已停止收音，请稍后再试。',
+            };
+            throw new Error(messages[response.status] || `硅基流动识别失败（${response.status}），已停止收音。`);
           }
           const data = await response.json();
           if (generation !== this.generation || this.active !== active) return;
-          if (typeof data.text !== 'string') throw new Error('Groq 返回格式异常，请稍后重试。');
-          const segments = Array.isArray(data.segments) ? data.segments : [];
-          const text = segments.length ? segments.filter(segment => !(segment.no_speech_prob > 0.85 && segment.avg_logprob < -1)).map(segment => segment.text || '').join('').trim() : data.text.trim();
+          if (typeof data.text !== 'string') throw new Error('硅基流动返回格式异常，请稍后重试。');
+          // 某些返回保留 SenseVoice 的语言、情绪和事件标签，翻译时只取文字。
+          const text = data.text.replace(/<\|[^<>]*?\|>/g, '').trim();
           if (text) {
-            this.prompt = text.slice(-400);
             this.onText(text);
           } else this.onState('empty', '这段没有识别到文字，仍在收音；可靠近声源再试。');
         })
         .catch(error => {
           if (generation !== this.generation || this.active !== active) return;
-          this.fail(timedOut ? 'Groq 识别超时，已停止收音。请检查网络后重试。' : error.name === 'TypeError' ? '无法连接 Groq，已停止收音。请检查网络后重试。' : error.message);
+          this.fail(timedOut ? '硅基流动识别超时，已停止收音。请检查网络后重试。' : error.name === 'TypeError' ? '无法连接硅基流动，已停止收音。请检查网络后重试。' : error.message);
         })
         .finally(() => {
           clearTimeout(timeout);
@@ -254,6 +254,6 @@
     }
   }
 
-  GroqASR.wav = wav;
-  window.LivesubsGroqASR = GroqASR;
+  SiliconASR.wav = wav;
+  window.LivesubsSiliconASR = SiliconASR;
 })();
