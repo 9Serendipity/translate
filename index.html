@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png" sizes="192x192">
-<link rel="stylesheet" href="app.css?v=9">
+<link rel="stylesheet" href="app.css?v=10">
 </head>
 <body>
 
@@ -45,6 +45,7 @@
   </section>
 
   <footer class="controls">
+    <div class="capture-status" id="groqCapture" hidden><span>Groq 收音</span><meter id="groqLevel" min="0" max="100" value="0" aria-label="Groq 收音音量"></meter></div>
     <div class="dirbar">
       <button class="lang-btn" id="srcBtn" type="button">
         <span class="lang-name" id="srcName">English</span>
@@ -65,7 +66,7 @@
       </button>
       <button class="key-btn" id="openMicTest" type="button" aria-label="收音测试" title="收音测试"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10v4M7.5 6v12M12 3v18M16.5 7v10M21 10v4"/></svg></button>
     </div>
-    <p class="speech-hint" id="speechHint" role="status">麦克风收音 · 请说 English</p>
+    <p class="speech-hint" id="speechHint" role="status">Groq AI 识别 · 请说 English</p>
   </footer>
 </main>
 
@@ -76,6 +77,17 @@
   <div class="sheet-card">
     <header><h2>设置</h2><button class="close" data-close="settingsSheet" type="button" aria-label="关闭设置"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
     <div class="sheet-body">
+      <label class="row col"><span>语音识别</span>
+        <select id="asrEngine"><option value="groq">Groq AI（需要自己的 Key）</option><option value="system">系统语音识别（免 Key）</option></select>
+      </label>
+      <div class="custom-box" id="groqBox">
+        <label class="row col"><span>Groq API Key</span><input type="password" id="groqKey" placeholder="填写 Groq 控制台创建的 Key" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="row"><span>在这台手机记住 Key</span><input type="checkbox" id="groqRemember"></label>
+        <label class="row col"><span>识别模型</span><select id="groqModel"><option value="whisper-large-v3">Whisper Large v3 · 准确优先</option><option value="whisper-large-v3-turbo">Whisper Large v3 Turbo · 速度优先</option></select></label>
+        <p class="hint">点说话后，短段录音会直接发送到 Groq 识别；本页不保存录音。Key 默认只用于本次会话，勾选后保存在这台手机浏览器。</p>
+        <p class="hint">免费档有每天音频量和请求次数限制；每次至少按 10 秒计费，短句频繁提交不等于能连续使用 8 小时。</p>
+        <p class="hint"><a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">去 Groq 创建 Key ↗</a> · <a href="https://console.groq.com/docs/rate-limits" target="_blank" rel="noopener noreferrer">查看免费限额 ↗</a></p>
+      </div>
       <label class="row">
         <span>字号</span>
         <input type="range" id="fontRange" min="22" max="64" step="2">
@@ -188,8 +200,9 @@
   </div>
 </div>
 
-<script src="subtitle-flow.js?v=9"></script>
-<script src="mic-test.js?v=9"></script>
-<script src="app.js?v=9"></script>
+<script src="subtitle-flow.js?v=10"></script>
+<script src="mic-test.js?v=10"></script>
+<script src="groq-asr.js?v=10"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

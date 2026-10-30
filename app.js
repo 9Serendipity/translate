@@ -40,6 +40,9 @@
     apiModel: '',
     apiKey: '',
     mmEmail: '',
+    asrEngine: 'groq',
+    groqModel: 'whisper-large-v3',
+    groqRemember: false,
   };
 
   const store = {
@@ -53,11 +56,19 @@
 
   const saved = store.read();
   const settings = { ...DEFAULTS, ...(saved.settings || {}) };
+  let groqKey = saved.groqKey || '';
+  try { if (!settings.groqRemember) groqKey = sessionStorage.getItem('livesubs.groqKey') || ''; } catch { /* 仅内存 */ }
   const pageSession = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   let historySequence = 0;
   let history = Array.isArray(saved.history) ? saved.history.slice(-HISTORY_LIMIT).map((item, index) => ({ ...item, id: item.id || `saved:${item.ts}:${index}` })) : [];
 
-  const persist = () => store.write({ settings, history });
+  const persist = () => {
+    store.write({ settings, history, ...(settings.groqRemember && groqKey ? { groqKey } : {}) });
+    try {
+      if (!settings.groqRemember && groqKey) sessionStorage.setItem('livesubs.groqKey', groqKey);
+      else sessionStorage.removeItem('livesubs.groqKey');
+    } catch { /* 仅内存 */ }
+  };
 
   /* ---------------- DOM ---------------- */
   const $ = (s, r = document) => r.querySelector(s);
@@ -351,6 +362,7 @@
     restartTimer: 0,
     idleTimer: 0,
     stopTimer: 0,
+    cloud: false,
   };
 
   const IDLE_STOP_MS = 30000;
@@ -378,7 +390,7 @@
     if (!on) setStatus('待机', false);
   }
 
-  function setSpeechHint(text = `麦克风收音 · 请说 ${srcLang().native}`) {
+  function setSpeechHint(text = `${settings.asrEngine === 'groq' ? 'Groq AI 识别' : '系统语音识别'} · 请说 ${srcLang().native}`) {
     $('#speechHint').textContent = text;
   }
 
@@ -419,6 +431,62 @@
       toast(`翻译失败：${error.message || error}`, 4200);
     },
   });
+
+  const groqASR = new window.LivesubsGroqASR({
+    onState(phase, message) {
+      if (!state.cloud) return;
+      if (phase === 'stopped') { finishListening(); return; }
+      setSpeechHint(message);
+      if (phase === 'listening') setStatus(`Groq 正在听 ${srcLang().native}…`, true);
+      else if (phase === 'recognizing') setStatus('Groq 正在识别…', state.listening);
+      else if (phase === 'finishing') {
+        state.listening = false;
+        state.stopping = true;
+        uiListening(false);
+        el.talk.disabled = true;
+        $('.lbl', el.talk).textContent = '收尾中';
+        setStatus('正在识别最后一段…');
+      }
+    },
+    onLevel(value) {
+      if (state.cloud) $('#groqLevel').value = value;
+    },
+    onText(text) {
+      if (!state.cloud) return;
+      state.heardText = true;
+      state.lastVoice = Date.now();
+      subtitleFlow.commit(text);
+    },
+    onError(error) {
+      if (!state.cloud) return;
+      failRecognition('Groq 识别已停止', error.message);
+    },
+  });
+
+  function startGroqListening() {
+    if (!window.isSecureContext) { toast('麦克风需要 HTTPS，请打开在线地址。'); return; }
+    if (!groqKey) {
+      syncSettingsUI();
+      $('#capInfo').textContent = capabilityText();
+      openSheet('settingsSheet');
+      $('#groqKey').focus();
+      toast('请先填写你自己的 Groq API Key，再点说话。', 4200);
+      return;
+    }
+    stopListening({ silent: true });
+    stopMicTest();
+    try { window.speechSynthesis?.cancel(); } catch { /* 无朗读服务 */ }
+    state.listening = state.cloud = true;
+    state.heardText = false;
+    state.lastVoice = Date.now();
+    clearCurrent();
+    uiListening(true);
+    $('#groqCapture').hidden = false;
+    $('#groqLevel').value = 0;
+    setStatus('正在启动 Groq 收音…', true);
+    keepAwake();
+    groqASR.start({ key: groqKey, model: settings.groqModel, language: settings.src });
+  }
 
   function queueTranslate(text, isFinal) {
     if (isFinal) subtitleFlow.commit(text);
@@ -526,6 +594,7 @@
   }
 
   function startListening() {
+    if (settings.asrEngine === 'groq') { startGroqListening(); return; }
     if (!SR) {
       setSpeechHint('请用 Safari 打开；也可点左下角用键盘听写');
       toast('当前浏览器没有可用的语音识别。请用 Safari 打开，或用键盘听写。', 4600);
@@ -578,6 +647,16 @@
 
   function stopListening({ silent = false } = {}) {
     const wasListening = state.listening || state.stopping;
+    if (state.cloud && !silent) {
+      if (!wasListening || state.stopping) return;
+      state.listening = false;
+      state.stopping = true;
+      uiListening(false);
+      el.talk.disabled = true;
+      $('.lbl', el.talk).textContent = '收尾中';
+      groqASR.stop();
+      return;
+    }
     state.listening = false;
     clearTimeout(state.restartTimer);
     clearInterval(state.idleTimer);
@@ -601,6 +680,9 @@
     clearTimeout(state.stopTimer);
     clearTimeout(state.restartTimer);
     clearInterval(state.idleTimer);
+    groqASR.cancel();
+    state.cloud = false;
+    $('#groqCapture').hidden = true;
     const rec = state.rec;
     state.rec = null;
     state.listening = false;
@@ -875,6 +957,11 @@
 
   /* ---------------- 设置面板 ---------------- */
   function syncSettingsUI() {
+    $('#asrEngine').value = settings.asrEngine;
+    $('#groqBox').hidden = settings.asrEngine !== 'groq';
+    $('#groqKey').value = groqKey;
+    $('#groqModel').value = settings.groqModel;
+    $('#groqRemember').checked = settings.groqRemember;
     $('#fontRange').value = settings.fontSize;
     $('#fontOut').textContent = settings.fontSize + 'px';
     $('#showOrig').checked = settings.showOrig;
@@ -889,6 +976,27 @@
   }
 
   function wireSettings() {
+    $('#asrEngine').addEventListener('change', e => {
+      stopListening({ silent: true });
+      settings.asrEngine = e.target.value;
+      $('#groqBox').hidden = settings.asrEngine !== 'groq';
+      persist();
+      setSpeechHint();
+    });
+    $('#groqKey').addEventListener('change', e => {
+      stopListening({ silent: true });
+      groqKey = e.target.value.trim();
+      persist();
+    });
+    $('#groqModel').addEventListener('change', e => {
+      stopListening({ silent: true });
+      settings.groqModel = e.target.value;
+      persist();
+    });
+    $('#groqRemember').addEventListener('change', e => {
+      settings.groqRemember = e.target.checked;
+      persist();
+    });
     $('#fontRange').addEventListener('input', (e) => {
       settings.fontSize = Number(e.target.value);
       $('#fontOut').textContent = settings.fontSize + 'px';
@@ -921,7 +1029,8 @@
 
   function capabilityText() {
     const bits = [];
-    bits.push(SR ? '语音识别：可用' : '语音识别：不可用');
+    bits.push(SR ? '系统语音识别：可用' : '系统语音识别：不可用');
+    bits.push(`Groq：${groqKey ? '已填写 Key' : '请填写 Key'}`);
     bits.push(window.isSecureContext ? '安全上下文：是' : '安全上下文：否（麦克风会被拦）');
     bits.push(navigator.onLine ? '网络：在线' : '网络：离线');
     if (health.lastOk) bits.push(`上次翻译走：${health.lastOk}`);
