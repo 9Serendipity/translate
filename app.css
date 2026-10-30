@@ -36,10 +36,10 @@ button{-webkit-appearance:none;appearance:none;cursor:pointer;}
   padding:0;display:inline-flex;align-items:center;justify-content:center;
 }
 
-body{display:flex;flex-direction:column;}
+body{display:flex;flex-direction:column;height:100vh;height:100dvh;}
 
 #app{
-  flex:1;min-height:0;display:flex;flex-direction:column;
+  flex:1;min-height:0;width:100%;display:flex;flex-direction:column;
   background:
     radial-gradient(120% 70% at 50% -10%, #0e2130 0%, rgba(8,12,17,0) 60%),
     radial-gradient(90% 50% at 50% 110%, #14202a 0%, rgba(8,12,17,0) 55%),
@@ -49,47 +49,74 @@ body{display:flex;flex-direction:column;}
 /* ---------- 顶栏 ---------- */
 .topbar{
   display:flex;align-items:center;gap:4px;flex:none;
-  padding:calc(6px + var(--safe-t)) 12px 2px;
+  padding:calc(8px + var(--safe-t)) calc(14px + var(--safe-r)) 6px calc(18px + var(--safe-l));
 }
-.brand{margin-right:auto;font-size:13px;letter-spacing:.06em;color:rgba(242,247,251,.42);}
+.brand{margin-right:auto;font-size:16px;font-weight:600;letter-spacing:.03em;color:rgba(242,247,251,.9);}
 .icon-btn{
   width:38px;height:38px;border-radius:11px;border:none;background:transparent;
   color:rgba(242,247,251,.7);font-size:17px;line-height:1;
 }
 .icon-btn:active{background:rgba(255,255,255,.08);}
 
-/* ---------- 主舞台 ---------- */
+/* ---------- 可滚动的完整对话 ---------- */
+.conversation{
+  flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;
+  padding:6px calc(18px + var(--safe-r)) 20px calc(18px + var(--safe-l));
+  overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y pinch-zoom;
+  scroll-padding-block:12px;overflow-anchor:none;
+}
+.conversation-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:8px 2px 16px;}
+.conversation-heading h1{margin:0;font-size:13px;font-weight:500;color:var(--muted);}
+.conversation-heading > span{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.timeline{display:flex;flex-direction:column;gap:12px;}
+.timeline-item{
+  min-width:0;padding:16px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.035);
+  user-select:text;-webkit-user-select:text;overflow-wrap:anywhere;
+}
+.timeline-item:last-child{border-color:rgba(55,230,255,.28);background:rgba(55,230,255,.035);}
+.timeline-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px;line-height:1.4;color:rgba(242,247,251,.4);margin-bottom:10px;}
+.timeline-meta > span{overflow-wrap:anywhere;}
+.timeline-original{margin:0 0 10px;font-size:15px;line-height:1.5;color:rgba(242,247,251,.58);white-space:pre-wrap;}
+.timeline-translation{margin:0;font-size:clamp(18px,calc(var(--trans-size) * .76),42px);line-height:1.46;font-weight:500;color:var(--text);white-space:pre-wrap;}
+.hide-original .timeline-original{display:none;}
+.history-empty{padding:clamp(50px,16dvh,150px) 20px;text-align:center;line-height:1.7;color:var(--muted);}
+.history-empty p{margin:0 0 12px;font-size:21px;color:rgba(242,247,251,.75);}
+.history-empty span{font-size:14px;}
 .stage{
-  flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;
-  padding:8px 22px;overflow:hidden;
+  display:flex;flex-direction:column;gap:10px;min-width:0;margin-top:12px;
+  padding:16px;border-radius:18px;border:1px solid rgba(55,230,255,.3);background:rgba(55,230,255,.04);
+  user-select:text;-webkit-user-select:text;
 }
 .orig{
-  font-size:calc(var(--trans-size) * .5);
+  font-size:16px;
   line-height:1.38;color:rgba(242,247,251,.58);
-  margin-bottom:.45em;
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
+  margin:0;white-space:pre-wrap;overflow-wrap:anywhere;
 }
 .orig:empty{display:none;}
-.live-input{margin-bottom:20px;padding-left:12px;border-left:2px solid rgba(55,230,255,.5);}
+.live-input{padding-left:12px;border-left:2px solid rgba(55,230,255,.5);}
 .live-input > span{font-size:11px;color:var(--accent);}
-.live-input p{margin:6px 0 0;font-size:16px;line-height:1.45;color:#b8c9d8;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+.live-input p{margin:6px 0 0;font-size:16px;line-height:1.5;color:#b8c9d8;white-space:pre-wrap;overflow-wrap:anywhere;}
 .trans{
   font-size:var(--trans-size);line-height:1.26;font-weight:600;
   letter-spacing:.1px;word-break:break-word;overflow-wrap:anywhere;
-  text-wrap:pretty;
+  text-wrap:pretty;white-space:pre-wrap;
 }
+.trans:empty{display:none;}
 .trans.placeholder{font-weight:400;font-size:calc(var(--trans-size) * .52);color:rgba(242,247,251,.3);}
 .trans.pending{opacity:.6;}
 .status{
-  margin-top:14px;font-size:12px;color:rgba(242,247,251,.35);
+  margin:0;font-size:12px;color:rgba(242,247,251,.5);
   font-variant-numeric:tabular-nums;min-height:16px;
 }
 .status.live{color:var(--accent);}
+.session-status{flex:none;min-height:30px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px calc(20px + var(--safe-r)) 6px calc(20px + var(--safe-l));}
+.jump-latest{border:1px solid rgba(55,230,255,.25);border-radius:999px;background:#12222b;color:var(--accent);font:inherit;font-size:12px;padding:6px 10px;white-space:nowrap;}
 
 /* ---------- 底部控制 ---------- */
 .controls{
   flex:none;display:flex;flex-direction:column;gap:12px;
-  padding:6px 16px calc(10px + var(--safe-b));
+  padding:6px calc(16px + var(--safe-r)) calc(10px + var(--safe-b)) calc(16px + var(--safe-l));
+  border-top:1px solid var(--line);background:rgba(8,12,17,.94);
 }
 
 .dirbar{
@@ -265,7 +292,9 @@ textarea{resize:none;line-height:1.5;user-select:text;-webkit-user-select:text;}
 @media (orientation:landscape) and (max-height:520px){
   .brand{display:none;}
   .topbar{justify-content:flex-end;padding:calc(4px + var(--safe-t)) calc(10px + var(--safe-r)) 0 calc(10px + var(--safe-l));}
-  .stage{padding:0 34px;}
+  .conversation{padding-top:0;}
+  .conversation-heading{margin-top:2px;margin-bottom:8px;}
+  .stage{padding:12px 16px;}
   .trans{font-size:calc(var(--trans-size) * .95);}
   .controls{flex-direction:row;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:4px calc(12px + var(--safe-r)) calc(8px + var(--safe-b)) calc(12px + var(--safe-l));}
   .speech-hint{flex-basis:100%;}

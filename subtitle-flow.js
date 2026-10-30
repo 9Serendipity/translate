@@ -15,6 +15,7 @@
       this.lastPreviewAt = -Infinity;
       this.epoch = 0;
       this.generation = 0;
+      this.sequence = 0;
       this.stableTimer = 0;
       this.maxTimer = 0;
     }
@@ -42,9 +43,15 @@
         if (this.active?.preview) this.active.controller.abort();
         return;
       }
+      const oldSegments = this.segments;
       const segments = this.earlySegments(clean, previous);
       let common = 0;
       while (common < segments.length && this.segments[common]?.text === segments[common].text) common += 1;
+      const languages = this.languages();
+      segments.forEach((segment, index) => {
+        const cached = this.previewResults.get(this.resultKey(segment.text, languages.from, languages.to));
+        segment.sourceKey = oldSegments[index]?.sourceKey || cached?.sourceKey || `${this.generation}:${this.epoch}:segment:${index}`;
+      });
       this.segments = segments;
       this.queue = this.queue.filter(task => !task.segment || (task.epoch === this.epoch && segments[task.index]?.text === task.text));
       if (this.active?.segment && segments[this.active.index]?.text !== this.active.text) this.active.controller.abort();
@@ -53,7 +60,7 @@
         this.previewed = '';
         if (this.active?.preview && !this.active.segment) this.active.controller.abort();
         for (let index = common; index < segments.length; index += 1) {
-          this.queue.push({ text: segments[index].text, preview: true, segment: true, index, epoch: this.epoch, ...this.languages() });
+          this.queue.push({ text: segments[index].text, sourceKey: segments[index].sourceKey, preview: true, segment: true, index, epoch: this.epoch, ...languages });
         }
         this.pump();
       }
@@ -158,6 +165,7 @@
       const parts = [...ready.map(part => part.text), ...this.sentences(clean.slice(end))];
       if (!parts.length) return;
       const languages = this.languages();
+      const oldSegments = this.segments;
       const promoted = this.active?.preview && parts.length === 1 && this.active.text === parts[0]
         && this.active.from === languages.from && this.active.to === languages.to;
       if (promoted) { this.active.preview = false; this.active.segment = false; }
@@ -168,12 +176,13 @@
       this.lastPreviewAt = -Infinity;
       if (this.active?.preview) this.active.controller.abort();
       this.queue = this.queue.filter(task => !task.preview);
-      for (const part of parts) {
+      for (const [index, part] of parts.entries()) {
         if (promoted) break;
         const key = this.resultKey(part, languages.from, languages.to);
         const cached = this.previewResults.get(key);
         this.previewResults.delete(key);
-        this.queue.push({ text: part, preview: false, cached, render: !cached, ...languages });
+        const sourceKey = cached?.sourceKey || oldSegments[index]?.sourceKey || `${this.generation}:final:${++this.sequence}`;
+        this.queue.push({ text: part, sourceKey, preview: false, cached, render: !cached, ...languages });
       }
       this.pump();
     }
@@ -225,6 +234,7 @@
       }
       if (!task) return;
       task.controller = new AbortController();
+      task.sourceKey ||= `${this.generation}:preview:${++this.sequence}`;
       task.generation = this.generation;
       this.active = task;
       if (!task.cached) this.onWorking(task);
@@ -236,7 +246,7 @@
         if (task.segment && this.segments[task.index]?.text !== task.text) return;
         if (task.preview) {
           if (this.previewResults.size >= 200) this.previewResults.delete(this.previewResults.keys().next().value);
-          this.previewResults.set(this.resultKey(task.text, task.from, task.to), result);
+          this.previewResults.set(this.resultKey(task.text, task.from, task.to), { ...result, sourceKey: task.sourceKey });
         }
         this.onResult({ ...task, result, ms: Math.round(performance.now() - began) });
       } catch (error) {

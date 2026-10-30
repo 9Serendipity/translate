@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>随身翻译</title>
 <meta name="description" content="点一下说话，实时翻译成另一种语言；中间一键换方向。">
 <meta name="theme-color" content="#080c11">
@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png" sizes="192x192">
-<link rel="stylesheet" href="app.css?v=8">
+<link rel="stylesheet" href="app.css?v=9">
 </head>
 <body>
 
@@ -25,15 +25,23 @@
 <main id="app">
   <header class="topbar">
     <span class="brand">随身翻译</span>
-    <button class="icon-btn" id="openHistory" type="button" aria-label="对话记录"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14"/></svg></button>
+    <button class="icon-btn" id="openHistory" type="button" aria-label="记录与导出"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14"/></svg></button>
     <button class="icon-btn" id="openSettings" type="button" aria-label="设置"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 3-.7 2.2-2 .9-2.1-.5-2.2 3.8L4 11v2l-1.5 1.6 2.2 3.8 2.1-.5 2 .9.7 2.2h5l.7-2.2 2-.9 2.1.5 2.2-3.8L20 13v-2l1.5-1.6-2.2-3.8-2.1.5-2-.9L14.5 3z"/><circle cx="12" cy="12" r="3"/></svg></button>
   </header>
 
-  <section class="stage">
-    <div class="live-input" id="liveInput" hidden><span>正在识别的原文</span><p id="liveDraft"></p></div>
-    <div class="orig" data-orig></div>
-    <div class="trans" data-trans>点下面的麦克风开始</div>
-    <div class="status" data-state>待机</div>
+  <section class="conversation" id="conversation" aria-label="翻译对话" tabindex="0">
+    <div class="conversation-heading"><h1>对话记录</h1><span id="historyCount">0 条</span></div>
+    <div class="history-empty" id="historyEmpty"><p>把每句话留在这里</p><span>点下方麦克风开始翻译，向上滑动可回看完整对话。</span></div>
+    <div class="timeline" id="timelineList" role="list" aria-label="原文与译文记录"></div>
+    <section class="stage" id="currentCard" aria-label="当前翻译" hidden>
+      <div class="live-input" id="liveInput" hidden><span>正在识别的原文</span><p id="liveDraft"></p></div>
+      <div class="orig" data-orig></div>
+      <div class="trans" data-trans></div>
+    </section>
+  </section>
+  <section class="session-status" aria-label="翻译状态">
+    <div class="status" data-state role="status">待机</div>
+    <button class="jump-latest" id="jumpLatest" type="button" hidden>回到最新 ↓</button>
   </section>
 
   <footer class="controls">
@@ -149,7 +157,7 @@
 <!-- 历史 -->
 <div class="sheet" id="historySheet" hidden>
   <div class="sheet-card">
-    <header><h2>对话记录</h2><button class="close" data-close="historySheet" type="button" aria-label="关闭对话记录"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+    <header><h2>记录与导出</h2><button class="close" data-close="historySheet" type="button" aria-label="关闭对话记录"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
     <div class="sheet-body list" id="historyList"></div>
     <footer class="foot-row">
       <button class="ghost2" id="srtBtn" type="button">导出 SRT</button>
@@ -180,8 +188,8 @@
   </div>
 </div>
 
-<script src="subtitle-flow.js?v=8"></script>
-<script src="mic-test.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="subtitle-flow.js?v=9"></script>
+<script src="mic-test.js?v=9"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

@@ -28,6 +28,7 @@
 
   /* ---------------- 设置 ---------------- */
   const KEY = 'livesubs.v2';
+  const HISTORY_LIMIT = 1000;
   const DEFAULTS = {
     src: 'en-US',   // 说哪种语言
     dst: 'zh-CN',   // 译成哪种
@@ -52,7 +53,9 @@
 
   const saved = store.read();
   const settings = { ...DEFAULTS, ...(saved.settings || {}) };
-  let history = Array.isArray(saved.history) ? saved.history.slice(-200) : [];
+  const pageSession = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  let historySequence = 0;
+  let history = Array.isArray(saved.history) ? saved.history.slice(-HISTORY_LIMIT).map((item, index) => ({ ...item, id: item.id || `saved:${item.ts}:${index}` })) : [];
 
   const persist = () => store.write({ settings, history });
 
@@ -70,6 +73,7 @@
   };
   const toastEl = $('#toast');
   let toastTimer = 0;
+  const historyView = { following: true, unread: 0, frame: 0, signatures: new WeakMap() };
 
   function toast(msg, ms = 2600) {
     toastEl.textContent = msg;
@@ -96,11 +100,13 @@
     el.trans.classList.toggle('placeholder', placeholder);
     el.trans.classList.toggle('pending', pending);
     el.trans.textContent = text;
+    if (text) { $('#currentCard').hidden = false; $('#historyEmpty').hidden = true; }
     fit(el.trans);
   }
 
   function setOrig(text) {
     el.orig.textContent = settings.showOrig ? text : '';
+    if (text) { $('#currentCard').hidden = false; $('#historyEmpty').hidden = true; }
   }
 
   function setStatus(text, live = false) {
@@ -108,32 +114,43 @@
     el.status.classList.toggle('live', live);
   }
 
-  // 字太大就往下缩，留 14% 余量，保证不贴着按钮
+  // 对话区可以滚动，文字保持设定字号，不再缩小或裁切。
   function fit(node) {
-    if (!node) return;
-    if (node.classList.contains('placeholder')) { node.style.fontSize = ''; return; }
-    const box = node.parentElement;
-    if (!box) return;
-    let size = settings.fontSize;
-    node.style.fontSize = size + 'px';
-    const boxStyle = getComputedStyle(box);
-    const otherHeight = [...box.children].filter(child => child !== node && !child.hidden).reduce((height, child) => {
-      const style = getComputedStyle(child);
-      return height + child.getBoundingClientRect().height + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
-    }, 0);
-    const limit = Math.max(40, box.clientHeight - otherHeight - (parseFloat(boxStyle.paddingTop) || 0) - (parseFloat(boxStyle.paddingBottom) || 0) - 8);
-    let guard = 0;
-    while (node.scrollHeight > limit && size > 15 && guard++ < 40) {
-      size -= 2;
-      node.style.fontSize = size + 'px';
-    }
-    // 缩到底还放不下：从头开始裁，保证句首可见
-    box.style.justifyContent = node.scrollHeight > box.clientHeight ? 'flex-start' : '';
+    if (node) node.style.fontSize = '';
+    queueConversationScroll();
   }
   function fitAll() { fit(el.trans); }
 
   window.addEventListener('resize', fitAll);
   window.addEventListener('orientationchange', () => setTimeout(fitAll, 220));
+
+  function updateJumpButton() {
+    const button = $('#jumpLatest');
+    button.hidden = historyView.following;
+    button.textContent = historyView.unread ? `${historyView.unread} 条新译文 · 回到最新 ↓` : '回到最新 ↓';
+  }
+
+  function queueConversationScroll() {
+    if (historyView.frame) return;
+    historyView.frame = requestAnimationFrame(() => {
+      historyView.frame = 0;
+      if (historyView.following) {
+        const view = $('#conversation');
+        view.scrollTop = view.scrollHeight;
+        historyView.unread = 0;
+      }
+      updateJumpButton();
+    });
+  }
+
+  function clearCurrent() {
+    el.orig.textContent = '';
+    el.trans.textContent = '';
+    el.trans.classList.remove('pending', 'placeholder');
+    $('#currentCard').hidden = $('#liveInput').hidden;
+    $('#historyEmpty').hidden = history.length > 0 || !$('#currentCard').hidden;
+    queueConversationScroll();
+  }
 
   /* ---------------- 翻译 ---------------- */
   const cache = new Map();
@@ -372,23 +389,26 @@
     onDraft(text) {
       $('#liveInput').hidden = !text;
       $('#liveDraft').textContent = text;
+      if (text) { $('#currentCard').hidden = false; $('#historyEmpty').hidden = true; }
+      else if (!el.trans.textContent.trim()) $('#currentCard').hidden = true;
       fitAll();
     },
     onWorking(task) {
       if (task.segment || !task.preview) { setOrig(task.text); fitAll(); }
-      el.trans.classList.add('pending');
+      setTrans('正在翻译…', { pending: true, placeholder: true });
       setStatus(task.preview && !task.segment ? '正在预览译文…' : '正在翻译…', state.listening);
     },
     onResult(task) {
-      if (task.render !== false) {
-        setOrig(task.text);
-        setTrans(task.result.text, { pending: task.preview && !task.segment });
-      } else if (el.orig.textContent === task.text) {
-        el.trans.classList.remove('pending');
+      if (!task.preview || task.segment) {
+        const id = task.sourceKey ? `${pageSession}:${task.sourceKey}` : undefined;
+        pushHistory(task.text, task.result.text, task.from, task.to, { id, provisional: task.preview });
+        clearCurrent();
+      } else {
+        setOrig('');
+        setTrans(task.result.text, { pending: true });
       }
       setStatus(task.preview ? '实时译文' : `已译 ${task.ms}ms`, state.listening);
       if (!task.preview) {
-        pushHistory(task.text, task.result.text, task.from, task.to);
         speak(task.result.text, task.to);
       }
     },
@@ -531,8 +551,7 @@
     state.lastVoice = Date.now();
 
     setOrig('');
-    if (el.trans.classList.contains('placeholder')) setTrans('…', { pending: true });
-    else el.trans.classList.add('pending');
+    setTrans('正在听，请开始说话…', { pending: true, placeholder: true });
     uiListening(true);
     setStatus('正在启动语音识别…', true);
     setSpeechHint(`准备接收 ${srcLang().native} · 首次使用请允许麦克风和语音识别`);
@@ -693,10 +712,15 @@
   }
 
   /* ---------------- 历史 ---------------- */
-  function pushHistory(orig, trans, from, to) {
+  function pushHistory(orig, trans, from, to, { id, provisional = false } = {}) {
     if (!orig || !trans) return;
-    history.push({ orig, trans, from, to, ts: Date.now() });
-    if (history.length > 200) history = history.slice(-200);
+    const existing = id ? history.findIndex(item => item.id === id) : -1;
+    if (existing >= 0) {
+      history[existing] = { ...history[existing], orig, trans, from, to, provisional };
+    } else {
+      history.push({ id: id || `${pageSession}:record:${++historySequence}`, orig, trans, from, to, provisional, ts: Date.now() });
+    }
+    if (history.length > HISTORY_LIMIT) history = history.slice(-HISTORY_LIMIT);
     persist();
     renderHistory();
   }
@@ -704,22 +728,61 @@
   const fmtTime = (ts) => new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
 
   function renderHistory() {
+    renderConversation();
     const list = $('#historyList');
     if (!history.length) {
       list.innerHTML = '<div class="empty">还没有记录</div>';
       return;
     }
     list.innerHTML = history
-      .slice(-60)
+      .slice()
       .reverse()
       .map((h) => `
         <div class="hitem">
           <div class="meta"><span>${fmtTime(h.ts)}</span>
-            <span>${langOf(h.from).label} → ${langOf(h.to).label}</span></div>
+            <span>${langOf(h.from).label} → ${langOf(h.to).label}${h.provisional ? ' · 实时' : ''}</span></div>
           <div class="o">${escapeHtml(h.orig)}</div>
           <div class="t">${escapeHtml(h.trans)}</div>
         </div>`)
       .join('');
+  }
+
+  function renderConversation() {
+    const view = $('#conversation'), list = $('#timelineList');
+    const top = view.getBoundingClientRect().top;
+    const anchor = !historyView.following ? [...list.children].find(item => item.getBoundingClientRect().bottom > top) : null;
+    const anchorId = anchor?.dataset.historyId;
+    const anchorOffset = anchor ? anchor.getBoundingClientRect().top - top : 0;
+    const existing = new Map([...list.children].map(item => [item.dataset.historyId, item]));
+    let added = 0;
+    history.forEach((item, index) => {
+      let card = existing.get(item.id);
+      if (!card) {
+        card = document.createElement('article');
+        card.className = 'timeline-item';
+        card.setAttribute('role', 'listitem');
+        card.dataset.historyId = item.id;
+        added += 1;
+      }
+      existing.delete(item.id);
+      const signature = JSON.stringify([item.orig, item.trans, item.from, item.to, item.provisional]);
+      if (historyView.signatures.get(card) !== signature) {
+        card.innerHTML = `<div class="timeline-meta"><time>${fmtTime(item.ts)}</time><span>${langOf(item.from).native} → ${langOf(item.to).native}${item.provisional ? ' · 实时' : ''}</span></div>
+          <p class="timeline-original" dir="${langOf(item.from).rtl ? 'rtl' : 'ltr'}">${escapeHtml(item.orig)}</p>
+          <p class="timeline-translation" dir="${langOf(item.to).rtl ? 'rtl' : 'ltr'}">${escapeHtml(item.trans)}</p>`;
+        historyView.signatures.set(card, signature);
+      }
+      if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
+    });
+    for (const card of existing.values()) card.remove();
+    $('#historyCount').textContent = `${history.length} 条`;
+    $('#historyEmpty').hidden = history.length > 0 || !$('#currentCard').hidden;
+    if (!historyView.following) {
+      historyView.unread += added;
+      const restored = [...list.children].find(item => item.dataset.historyId === anchorId);
+      if (restored) view.scrollTop += restored.getBoundingClientRect().top - top - anchorOffset;
+      updateJumpButton();
+    } else queueConversationScroll();
   }
 
   function escapeHtml(s) {
@@ -837,6 +900,7 @@
       settings.showOrig = e.target.checked;
       persist();
       el.orig.style.display = e.target.checked ? '' : 'none';
+      document.documentElement.classList.toggle('hide-original', !e.target.checked);
     });
     $('#tts').addEventListener('change', (e) => { settings.tts = e.target.checked; persist(); });
     $('#engine').addEventListener('change', (e) => {
@@ -890,6 +954,7 @@
       setTrans(out);
       setStatus('已译');
       pushHistory(text, out, from, to);
+      clearCurrent();
       speak(out, to);
     } catch (err) {
       if (controller.signal.aborted || typedRequest !== controller) return;
@@ -909,6 +974,16 @@
     $('#openMicTest').addEventListener('click', openMicTest);
     $('#testMicSettings').addEventListener('click', openMicTest);
     $('#micRecord').addEventListener('click', toggleMicTest);
+    $('#conversation').addEventListener('scroll', () => {
+      const view = $('#conversation');
+      historyView.following = view.scrollHeight - view.clientHeight - view.scrollTop < 60;
+      if (historyView.following) historyView.unread = 0;
+      updateJumpButton();
+    }, { passive: true });
+    $('#jumpLatest').addEventListener('click', () => {
+      historyView.following = true;
+      queueConversationScroll();
+    });
 
     $('#swap').addEventListener('click', () => {
       stopListening({ silent: true });
@@ -953,13 +1028,14 @@
 
     document.documentElement.style.setProperty('--trans-size', settings.fontSize + 'px');
     if (!settings.showOrig) el.orig.style.display = 'none';
+    document.documentElement.classList.toggle('hide-original', !settings.showOrig);
 
     renderLangs();
     wire();
     wireSettings();
     renderHistory();
 
-    setTrans(placeholderText(), { placeholder: true });
+    clearCurrent();
     setStatus('待机');
 
     // 开机探一次 Google：国内基本连不上，先把断路器打开，别让第一句干等超时
